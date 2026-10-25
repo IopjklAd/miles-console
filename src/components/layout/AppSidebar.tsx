@@ -26,12 +26,15 @@ import { prefetchRoute, routeKeyForPath } from "@/lib/route-loaders";
 import { useMiles } from "@/state/miles";
 import {
   Bot,
+  Camera,
   Gamepad2,
   Gauge,
   LayoutDashboard,
   MessagesSquare,
   ScrollText,
+  Server,
   Settings,
+  Volume2,
   type LucideIcon,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router";
@@ -49,6 +52,8 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { to: "/dashboard", label: "Vue d'ensemble", icon: LayoutDashboard, end: true },
       { to: "/dashboard/capteurs", label: "Capteurs", icon: Gauge },
+      { to: "/dashboard/vision", label: "Vision", icon: Camera },
+      { to: "/dashboard/audio", label: "Audio", icon: Volume2 },
       { to: "/dashboard/journaux", label: "Journaux", icon: ScrollText },
     ],
   },
@@ -62,7 +67,10 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
   {
     label: "Système",
-    items: [{ to: "/dashboard/parametres", label: "Paramètres", icon: Settings }],
+    items: [
+      { to: "/dashboard/services", label: "Services", icon: Server },
+      { to: "/dashboard/parametres", label: "Paramètres", icon: Settings },
+    ],
   },
 ];
 

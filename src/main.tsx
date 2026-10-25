@@ -20,6 +20,9 @@ const Assistant = lazy(routeLoaders.assistant);
 const Conversations = lazy(routeLoaders.conversations);
 const Control = lazy(routeLoaders.control);
 const Sensors = lazy(routeLoaders.sensors);
+const Vision = lazy(routeLoaders.vision);
+const Audio = lazy(routeLoaders.audio);
+const Services = lazy(routeLoaders.services);
 const Logs = lazy(routeLoaders.logs);
 const Settings = lazy(routeLoaders.settings);
 const NotFound = lazy(routeLoaders.notFound);
@@ -167,6 +170,9 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="conversations" element={<Conversations />} />
                   <Route path="controle" element={<Control />} />
                   <Route path="capteurs" element={<Sensors />} />
+                  <Route path="vision" element={<Vision />} />
+                  <Route path="audio" element={<Audio />} />
+                  <Route path="services" element={<Services />} />
                   <Route path="journaux" element={<Logs />} />
                   <Route path="parametres" element={<Settings />} />
                 </Route>

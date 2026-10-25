@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseAudio,
   parseCapabilities,
   parseCommandResponse,
   parseLogs,
   parseSensors,
+  parseServices,
   parseStatus,
+  parseVision,
 } from "@/miles/api/schema";
 
 describe("parseStatus", () => {
@@ -149,5 +152,110 @@ describe("parseCapabilities", () => {
 
   it("reads the whole manifest, rejecting malformed entries", () => {
     expect(() => parseCapabilities([{ label: "sans id" }])).toThrow();
+  });
+});
+
+describe("parseServices", () => {
+  it("maps services and defaults controllable to false", () => {
+    const services = parseServices(
+      {
+        services: [
+          { id: "miles-core", name: "miles-core", status: "operational", version: "1.0.0" },
+        ],
+      },
+      "live",
+    );
+
+    expect(services).toHaveLength(1);
+    expect(services[0].controllable).toBe(false);
+    expect(services[0].statusLabel).toBe("Opérationnel");
+    expect(services[0].version).toBe("1.0.0");
+    expect(services[0].origin).toBe("live");
+  });
+
+  it("keeps an explicit control flag and status label", () => {
+    const [service] = parseServices(
+      [{ id: "svc", name: "svc", status: "down", controllable: true }],
+      "live",
+    );
+    expect(service.controllable).toBe(true);
+    expect(service.statusLabel).toBe("Arrêté");
+  });
+
+  it("rejects malformed payloads", () => {
+    expect(() => parseServices([{ name: "sans id" }], "live")).toThrow();
+    expect(() => parseServices("nope", "live")).toThrow();
+  });
+});
+
+describe("parseVision", () => {
+  it("maps a complete payload", () => {
+    const vision = parseVision(
+      {
+        webcam: { status: "operational", label: "Cam" },
+        stream: "live",
+        width: 640,
+        height: 480,
+        fps: 10,
+        lastFrameAt: 1,
+        controllable: true,
+      },
+      "live",
+    );
+
+    expect(vision.stream).toBe("live");
+    expect(vision.webcam.status).toBe("operational");
+    expect(vision.width).toBe(640);
+    expect(vision.controllable).toBe(true);
+    expect(vision.origin).toBe("live");
+  });
+
+  it("turns absent fields into null/unknown — never guesses", () => {
+    const vision = parseVision({}, "live");
+    expect(vision.stream).toBe("idle");
+    expect(vision.width).toBeNull();
+    expect(vision.snapshotUrl).toBeNull();
+    expect(vision.controllable).toBe(false);
+    expect(vision.webcam.status).toBe("unknown");
+  });
+
+  it("rejects an unknown stream state", () => {
+    expect(() => parseVision({ stream: "broadcasting" }, "live")).toThrow();
+  });
+});
+
+describe("parseAudio", () => {
+  it("maps endpoints and controls", () => {
+    const audio = parseAudio(
+      {
+        input: { status: "operational", label: "Mic" },
+        output: { status: "down" },
+        capturing: true,
+        playing: false,
+        levelDbfs: -12.5,
+        volume: 55,
+        volumeControllable: true,
+      },
+      "live",
+    );
+
+    expect(audio.input.status).toBe("operational");
+    expect(audio.output.status).toBe("down");
+    expect(audio.capturing).toBe(true);
+    expect(audio.levelDbfs).toBe(-12.5);
+    expect(audio.volumeControllable).toBe(true);
+  });
+
+  it("defaults missing pieces to unavailable", () => {
+    const audio = parseAudio({}, "live");
+    expect(audio.input.status).toBe("unknown");
+    expect(audio.input.detail).toMatch(/backend/);
+    expect(audio.volumeControllable).toBe(false);
+    expect(audio.levelDbfs).toBeNull();
+    expect(audio.volume).toBeNull();
+  });
+
+  it("rejects an invalid device status", () => {
+    expect(() => parseAudio({ input: { status: "loud" } }, "live")).toThrow();
   });
 });

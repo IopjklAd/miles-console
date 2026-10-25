@@ -208,6 +208,82 @@ export interface CommandResult {
 }
 
 /* ------------------------------------------------------------------ */
+/* Software services                                                   */
+/* ------------------------------------------------------------------ */
+
+/** Control action offered by the backend, when it offers one at all. */
+export type ServiceAction = "start" | "stop" | "restart";
+
+/**
+ * One software process of the MILES stack. `controllable` mirrors what the
+ * backend declares: when it is false the UI never shows start/stop buttons.
+ */
+export interface ServiceInfo {
+  id: string;
+  name: string;
+  description?: string | null;
+  status: Availability;
+  statusLabel: string;
+  lastActivityAt?: number | null;
+  lastError?: string | null;
+  version?: string | null;
+  controllable: boolean;
+  origin: DataOrigin;
+}
+
+/* ------------------------------------------------------------------ */
+/* Vision (webcam served by the backend)                               */
+/* ------------------------------------------------------------------ */
+
+export type StreamState = "idle" | "starting" | "live" | "error";
+
+/**
+ * Stream provided by the MILES backend — the browser never reads the USB
+ * webcam itself. Every field is optional because a backend may expose only
+ * part of them: absent means "Indisponible", never a guess.
+ */
+export interface VisionState {
+  webcam: ComponentState;
+  stream: StreamState;
+  width?: number | null;
+  height?: number | null;
+  fps?: number | null;
+  lastFrameAt?: number | null;
+  /** Last frame image URL, when the backend serves snapshots. */
+  snapshotUrl?: string | null;
+  lastError?: string | null;
+  /** Backend declares start/stop endpoints for the stream. */
+  controllable: boolean;
+  fetchedAt: number;
+  origin: DataOrigin;
+}
+
+/* ------------------------------------------------------------------ */
+/* Audio                                                               */
+/* ------------------------------------------------------------------ */
+
+export interface AudioEndpoint {
+  status: Availability;
+  label: string;
+  detail?: string | null;
+}
+
+export interface AudioState {
+  input: AudioEndpoint;
+  output: AudioEndpoint;
+  capturing: boolean;
+  playing: boolean;
+  /** Input level in dBFS when the backend measures it. */
+  levelDbfs?: number | null;
+  /** Output volume 0–100 when the backend exposes a control. */
+  volume?: number | null;
+  volumeControllable: boolean;
+  lastError?: string | null;
+  fetchedAt: number;
+  origin: DataOrigin;
+}
+
+/* ------------------------------------------------------------------ */
 /* Notifications                                                       */
 /* ------------------------------------------------------------------ */
 

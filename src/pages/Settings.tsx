@@ -73,8 +73,16 @@ const TIME_ZONES = Array.from(
 
 export default function Settings() {
   const { settings, update, save } = useSettings();
-  const { mode, setMode, connection, backendConfigured, api, lastUpdate, refresh } =
-    useMiles();
+  const {
+    mode,
+    setMode,
+    connection,
+    backendConfigured,
+    api,
+    lastUpdate,
+    refresh,
+    pushNotification,
+  } = useMiles();
   const { status: aiStatus, probe, probing } = useAiStatus();
   const { user, signOut } = useAuth();
   const { resolvedTheme, setTheme } = useTheme();
@@ -84,6 +92,12 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [probeResult, setProbeResult] = useState<{
+    ok: boolean;
+    error?: string;
+    latencyMs?: number;
+    model?: string;
+  } | null>(null);
 
   const handleSave = async () => {
     setSaving(true);
@@ -93,7 +107,16 @@ export default function Settings() {
       });
       if (result.saved && result.synced) toast.success(result.message);
       else if (result.saved) toast.info(result.message);
-      else toast.error(result.message);
+      else {
+        toast.error(result.message);
+        pushNotification({
+          title: "Échec de la sauvegarde",
+          message: result.message,
+          severity: "error",
+          dedupeKey: "settings:save-failed",
+          origin: "app",
+        });
+      }
     } finally {
       setSaving(false);
     }
@@ -392,7 +415,21 @@ export default function Settings() {
             variant="outline"
             size="sm"
             className="cursor-pointer gap-2"
-            onClick={() => void probe()}
+            onClick={() => {
+              void probe().then((result) => {
+                setProbeResult(result);
+                if (!result.ok) {
+                  pushNotification({
+                    title: "Test du fournisseur IA échoué",
+                    message:
+                      result.error ?? "Le fournisseur IA ne répond pas.",
+                    severity: "error",
+                    dedupeKey: "ai:probe-failed",
+                    origin: "app",
+                  });
+                }
+              });
+            }}
             disabled={probing}
           >
             {probing ? (
@@ -418,6 +455,33 @@ export default function Settings() {
                   ? "Configuré"
                   : "Non configuré"
                 : "Inconnu"}
+            </span>
+          </DataPair>
+
+          <DataPair label="Dernier test de connectivité">
+            <span
+              className={cn(
+                probeResult
+                  ? probeResult.ok
+                    ? "text-success"
+                    : "text-danger"
+                  : "text-muted-foreground",
+              )}
+            >
+              {probeResult
+                ? probeResult.ok
+                  ? `${probeResult.latencyMs ?? 0} ms — ${probeResult.model ?? "modèle inconnu"}`
+                  : "échec"
+                : "jamais exécuté"}
+            </span>
+          </DataPair>
+          <DataPair label="Dernière erreur du fournisseur">
+            <span
+              className={cn(
+                probeResult && !probeResult.ok ? "text-danger" : "text-muted-foreground",
+              )}
+            >
+              {probeResult && !probeResult.ok ? probeResult.error : "aucune"}
             </span>
           </DataPair>
 

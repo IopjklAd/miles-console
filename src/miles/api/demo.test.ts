@@ -91,3 +91,91 @@ describe("demo data source", () => {
     await expect(api.getSettings()).resolves.toEqual({});
   });
 });
+
+/**
+ * Services / vision / audio: a coherent simulated stack where commands are
+ * accepted in order and no frame is ever fabricated.
+ */
+
+describe("demo services, vision and audio", () => {
+  const api = createMilesApi("demo");
+
+  it("exposes a coherent, clearly simulated stack", async () => {
+    const services = await api.getServices();
+    expect(services.length).toBeGreaterThan(0);
+    expect(services.every((service) => service.origin === "demo")).toBe(true);
+
+    const visionService = services.find((service) => service.id === "miles-vision");
+    expect(visionService?.status).toBe("down");
+    expect(visionService?.controllable).toBe(true);
+
+    const vision = await api.getVision();
+    expect(vision.origin).toBe("demo");
+    expect(vision.webcam.origin).toBe("demo");
+    expect(vision.stream).toBe("idle");
+    // The demo engine never invents an image.
+    expect(vision.snapshotUrl).toBeNull();
+    expect(vision.width).toBeNull();
+  });
+
+  it("refuses to start the stream while the vision service is down", async () => {
+    const rejected = await api.visionCommand("start");
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.error).toMatch(/miles-vision/);
+    expect(rejected.origin).toBe("demo");
+  });
+
+  it("starts the service, then the stream, in order", async () => {
+    const started = await api.serviceCommand({
+      serviceId: "miles-vision",
+      action: "start",
+      label: "Démarrer miles-vision",
+    });
+    expect(started.status).toBe("accepted");
+    expect(started.message).toMatch(/démonstration/);
+
+    const accepted = await api.visionCommand("start");
+    expect(accepted.status).toBe("accepted");
+
+    const vision = await api.getVision();
+    expect(vision.stream).toBe("live");
+    expect(vision.width).toBe(640);
+    expect(vision.webcam.status).toBe("operational");
+    expect(vision.snapshotUrl).toBeNull();
+  });
+
+  it("stopping the service takes the stream down with it", async () => {
+    await api.serviceCommand({
+      serviceId: "miles-vision",
+      action: "stop",
+      label: "Arrêter miles-vision",
+    });
+    const vision = await api.getVision();
+    expect(vision.stream).toBe("idle");
+    expect(vision.webcam.status).toBe("unavailable");
+    expect(vision.lastError).toMatch(/miles-vision/);
+  });
+
+  it("rejects commands against unknown or uncontrollable services", async () => {
+    const unknown = await api.serviceCommand({
+      serviceId: "inexistant",
+      action: "restart",
+      label: "?",
+    });
+    expect(unknown.status).toBe("rejected");
+    expect(unknown.origin).toBe("demo");
+  });
+
+  it("reports audio devices and clamps the volume control", async () => {
+    const audio = await api.getAudio();
+    expect(audio.origin).toBe("demo");
+    expect(audio.volumeControllable).toBe(true);
+    expect(audio.input.label).toBeTruthy();
+    expect(audio.levelDbfs).not.toBeNull();
+
+    await api.setVolume(150);
+    expect((await api.getAudio()).volume).toBe(100);
+    await api.setVolume(-10);
+    expect((await api.getAudio()).volume).toBe(0);
+  });
+});

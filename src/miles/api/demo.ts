@@ -15,6 +15,7 @@ import { type HistoryRange, LOG_FETCH_LIMIT } from "@/config/app";
 import type { MilesApi } from "./contract";
 import type {
   AppSettings,
+  AudioState,
   CommandResult,
   LogEntry,
   LogLevel,
@@ -22,7 +23,10 @@ import type {
   RobotState,
   Sensor,
   SensorHistory,
+  ServiceAction,
+  ServiceInfo,
   SystemStatus,
+  VisionState,
 } from "@/miles/types";
 
 const MINUTE = 60_000;
@@ -112,6 +116,68 @@ const DEMO_CAPABILITIES: RobotCapability[] = [
 ];
 
 /* ------------------------------------------------------------------ */
+/* Services (demo stack)                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Simulated software stack. Kept coherent with the demo status payload and
+ * logs (`miles-vision` is down, which is why the stream starts idle).
+ */
+function buildDemoServices(): ServiceInfo[] {
+  const now = Date.now();
+  return [
+    {
+      id: "miles-core",
+      name: "miles-core",
+      description: "Boucle de supervision et API REST de la console.",
+      status: "operational",
+      statusLabel: "En marche",
+      lastActivityAt: now,
+      lastError: null,
+      version: "1.4.2",
+      controllable: true,
+      origin: "demo",
+    },
+    {
+      id: "miles-esp32-bridge",
+      name: "miles-esp32-bridge",
+      description: "Pont série vers l'ESP32-S3.",
+      status: "degraded",
+      statusLabel: "Dégradé",
+      lastActivityAt: now - 45_000,
+      lastError: "Trames reçues en retard (simulé).",
+      version: "1.1.0",
+      controllable: true,
+      origin: "demo",
+    },
+    {
+      id: "miles-vision",
+      name: "miles-vision",
+      description: "Capture webcam et publication du flux vidéo.",
+      status: "down",
+      statusLabel: "Arrêté",
+      lastActivityAt: now - 300_000,
+      lastError: "Arrêté (simulé).",
+      version: "1.3.0",
+      controllable: true,
+      origin: "demo",
+    },
+    {
+      id: "miles-audio",
+      name: "miles-audio",
+      description: "Capture et restitution sonores.",
+      status: "operational",
+      statusLabel: "En marche",
+      lastActivityAt: now,
+      lastError: null,
+      version: "1.4.2",
+      controllable: true,
+      origin: "demo",
+    },
+  ];
+}
+
+/* ------------------------------------------------------------------ */
 /* Log generation                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -164,6 +230,9 @@ export class DemoEngine implements MilesApi {
   private commandSeq = 0;
   private robotMode = "veille";
   private lastCommand: CommandResult | null = null;
+  private readonly demoServices = buildDemoServices();
+  private stream: "idle" | "starting" | "live" | "error" = "idle";
+  private demoVolume = 70;
 
   /* ----------------------------- logs ---------------------------- */
 
@@ -438,6 +507,207 @@ export class DemoEngine implements MilesApi {
     };
     this.lastCommand = result;
     return result;
+  }
+
+  /* --------------------------- services -------------------------- */
+
+  getServices(): Promise<ServiceInfo[]> {
+    // Touch activities of running services so "dernière activité" moves.
+    const now = Date.now();
+    return Promise.resolve(
+      this.demoServices.map((service) =>
+        service.status === "operational"
+          ? { ...service, lastActivityAt: now }
+          : service,
+      ),
+    );
+  }
+
+  async serviceCommand(input: {
+    serviceId: string;
+    action: ServiceAction;
+    label: string;
+  }): Promise<CommandResult> {
+    const sentAt = Date.now();
+    const commandId = `demo-svc-${++this.commandSeq}`;
+    const service = this.demoServices.find(
+      (item) => item.id === input.serviceId,
+    );
+
+    if (!service || !service.controllable) {
+      return {
+        commandId,
+        capabilityId: `${input.serviceId}:${input.action}`,
+        label: input.label,
+        status: "rejected",
+        sentAt,
+        acknowledgedAt: Date.now(),
+        error: "Service inconnu ou non contrôlable (démonstration).",
+        origin: "demo",
+      };
+    }
+
+    await sleep(320 + Math.random() * 480);
+
+    if (input.action === "stop") {
+      service.status = "down";
+      service.statusLabel = "Arrêté";
+      service.lastError = "Arrêt demandé depuis la console (démonstration).";
+      if (service.id === "miles-vision") this.stream = "idle";
+    } else {
+      service.status = "operational";
+      service.statusLabel = "En marche";
+      service.lastError = null;
+      service.lastActivityAt = Date.now();
+    }
+
+    const verb =
+      input.action === "start"
+        ? "démarré"
+        : input.action === "stop"
+          ? "arrêté"
+          : "redémarré";
+    return {
+      commandId,
+      capabilityId: `${service.id}:${input.action}`,
+      label: input.label,
+      status: "accepted",
+      sentAt,
+      acknowledgedAt: Date.now(),
+      message: `Service ${service.id} ${verb} (démonstration).`,
+      origin: "demo",
+    };
+  }
+
+  /* ---------------------------- vision --------------------------- */
+
+  getVision(): Promise<VisionState> {
+    const now = Date.now();
+    const service = this.demoServices.find((item) => item.id === "miles-vision");
+    const serviceDown = service?.status === "down";
+
+    if (serviceDown && this.stream !== "idle") this.stream = "idle";
+
+    const webcam = serviceDown
+      ? {
+          status: "unavailable" as const,
+          label: "Indisponible",
+          detail: "Service miles-vision arrêté (simulé).",
+          checkedAt: now,
+          origin: "demo" as const,
+        }
+      : {
+          status: "operational" as const,
+          label: "Connectée",
+          detail: "Webcam 640×480 (simulée).",
+          checkedAt: now,
+          origin: "demo" as const,
+        };
+
+    const live = this.stream === "live";
+    return Promise.resolve({
+      webcam,
+      stream: this.stream,
+      width: live ? 640 : null,
+      height: live ? 480 : null,
+      fps: live ? 10 : null,
+      lastFrameAt: live ? now : null,
+      // The demo engine never fabricates an image: only a backend serves frames.
+      snapshotUrl: null,
+      lastError: serviceDown
+        ? "Service miles-vision arrêté (simulé)."
+        : this.stream === "error"
+          ? "Flux interrompu (simulé)."
+          : null,
+      controllable: true,
+      fetchedAt: now,
+      origin: "demo",
+    });
+  }
+
+  async visionCommand(action: "start" | "stop"): Promise<CommandResult> {
+    const sentAt = Date.now();
+    const commandId = `demo-vis-${++this.commandSeq}`;
+    const service = this.demoServices.find((item) => item.id === "miles-vision");
+    const label =
+      action === "start" ? "Démarrer le flux" : "Arrêter le flux";
+    const capabilityId = `stream:${action}`;
+
+    if (action === "start" && service?.status === "down") {
+      return {
+        commandId,
+        capabilityId,
+        label,
+        status: "rejected",
+        sentAt,
+        acknowledgedAt: Date.now(),
+        error:
+          "Service miles-vision arrêté : démarrez d'abord le service (démonstration).",
+        origin: "demo",
+      };
+    }
+
+    if (action === "start") {
+      this.stream = "starting";
+      await sleep(500);
+      this.stream = "live";
+    } else {
+      this.stream = "idle";
+    }
+
+    return {
+      commandId,
+      capabilityId,
+      label,
+      status: "accepted",
+      sentAt,
+      acknowledgedAt: Date.now(),
+      message:
+        action === "start"
+          ? "Flux démarré (démonstration)."
+          : "Flux arrêté (démonstration).",
+      origin: "demo",
+    };
+  }
+
+  /* ----------------------------- audio --------------------------- */
+
+  getAudio(): Promise<AudioState> {
+    const now = Date.now();
+    const seconds = (now - this.startAt) / 1000;
+    const serviceDown =
+      this.demoServices.find((item) => item.id === "miles-audio")?.status ===
+      "down";
+    // Smooth oscillation between -34 and -6 dBFS (clearly labelled simulated).
+    const level = -20 + Math.sin(seconds / 3) * 14;
+
+    return Promise.resolve({
+      input: {
+        status: serviceDown ? "unavailable" : "operational",
+        label: "Micro USB (simulé)",
+        detail: serviceDown ? "Service miles-audio arrêté (simulé)." : null,
+      },
+      output: {
+        status: serviceDown ? "unavailable" : "operational",
+        label: "Haut-parleurs (simulé)",
+        detail: serviceDown ? "Service miles-audio arrêté (simulé)." : null,
+      },
+      capturing: !serviceDown,
+      playing: false,
+      levelDbfs: serviceDown ? null : Math.round(level * 10) / 10,
+      volume: this.demoVolume,
+      volumeControllable: true,
+      lastError: serviceDown
+        ? "Service miles-audio arrêté (simulé)."
+        : null,
+      fetchedAt: now,
+      origin: "demo",
+    });
+  }
+
+  setVolume(percent: number): Promise<void> {
+    this.demoVolume = Math.min(100, Math.max(0, Math.round(percent)));
+    return Promise.resolve();
   }
 
   /* --------------------------- settings -------------------------- */

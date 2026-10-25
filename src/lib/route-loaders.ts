@@ -16,6 +16,9 @@ export const routeLoaders = {
   conversations: () => import("../pages/Conversations.tsx"),
   control: () => import("../pages/Control.tsx"),
   sensors: () => import("../pages/Sensors.tsx"),
+  vision: () => import("../pages/Vision.tsx"),
+  audio: () => import("../pages/Audio.tsx"),
+  services: () => import("../pages/Services.tsx"),
   logs: () => import("../pages/Logs.tsx"),
   settings: () => import("../pages/Settings.tsx"),
   notFound: () => import("../pages/NotFound.tsx"),
@@ -64,6 +67,12 @@ export function routeKeyForPath(pathname: string): RouteKey | null {
       return "control";
     case "capteurs":
       return "sensors";
+    case "vision":
+      return "vision";
+    case "audio":
+      return "audio";
+    case "services":
+      return "services";
     case "journaux":
       return "logs";
     case "parametres":

@@ -14,6 +14,7 @@ import type { HistoryRange } from "@/config/app";
 import { STALE_AFTER_MS } from "@/config/app";
 import type {
   AppSettings,
+  AudioState,
   Availability,
   CommandResult,
   DataOrigin,
@@ -23,7 +24,9 @@ import type {
   RobotState,
   Sensor,
   SensorHistory,
+  ServiceInfo,
   SystemStatus,
+  VisionState,
 } from "@/miles/types";
 
 const availabilityEnum = z.enum([
@@ -376,6 +379,133 @@ export function parseCommandResponse(
     message: optionalString(wire.message),
     error: optionalString(wire.error),
     origin: context.origin,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Services, vision, audio                                             */
+/* ------------------------------------------------------------------ */
+
+const serviceWire = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  status: availabilityEnum,
+  statusLabel: z.string().optional(),
+  lastActivityAt: z.number().nullable().optional(),
+  lastError: z.string().nullable().optional(),
+  version: z.string().nullable().optional(),
+  controllable: z.boolean().optional(),
+});
+
+/**
+ * Map a `GET /api/services` response.
+ *
+ * `controllable` defaults to **false**: a backend that does not declare the
+ * field gets read-only pages, never invented start/stop buttons.
+ */
+export function parseServices(
+  payload: unknown,
+  origin: DataOrigin,
+): ServiceInfo[] {
+  return z
+    .array(serviceWire)
+    .parse(asArray(payload, "services"))
+    .map((wire) => ({
+      id: wire.id,
+      name: wire.name,
+      description: wire.description ?? null,
+      status: wire.status,
+      statusLabel: wire.statusLabel ?? statusLabel(wire.status),
+      lastActivityAt: wire.lastActivityAt ?? null,
+      lastError: wire.lastError ?? null,
+      version: wire.version ?? null,
+      controllable: wire.controllable ?? false,
+      origin,
+    }));
+}
+
+const visionWire = z.object({
+  webcam: componentStateWire.optional(),
+  stream: z.enum(["idle", "starting", "live", "error"]).optional(),
+  width: z.number().nullable().optional(),
+  height: z.number().nullable().optional(),
+  fps: z.number().nullable().optional(),
+  lastFrameAt: z.number().nullable().optional(),
+  snapshotUrl: z.string().nullable().optional(),
+  lastError: z.string().nullable().optional(),
+  controllable: z.boolean().optional(),
+});
+
+/** Map a `GET /api/vision` response; absent fields become `null` ("Indisponible"). */
+export function parseVision(payload: unknown, origin: DataOrigin): VisionState {
+  const wire = visionWire.parse(payload);
+  const now = Date.now();
+  return {
+    webcam: mapComponent(wire.webcam, origin, now),
+    stream: wire.stream ?? "idle",
+    width: wire.width ?? null,
+    height: wire.height ?? null,
+    fps: wire.fps ?? null,
+    lastFrameAt: wire.lastFrameAt ?? null,
+    snapshotUrl: optionalString(wire.snapshotUrl) ?? null,
+    lastError: wire.lastError ?? null,
+    controllable: wire.controllable ?? false,
+    fetchedAt: now,
+    origin,
+  };
+}
+
+const audioWire = z.object({
+  input: z
+    .object({
+      status: availabilityEnum,
+      label: z.string().optional(),
+      detail: z.string().nullable().optional(),
+    })
+    .optional(),
+  output: z
+    .object({
+      status: availabilityEnum,
+      label: z.string().optional(),
+      detail: z.string().nullable().optional(),
+    })
+    .optional(),
+  capturing: z.boolean().optional(),
+  playing: z.boolean().optional(),
+  levelDbfs: z.number().nullable().optional(),
+  volume: z.number().nullable().optional(),
+  volumeControllable: z.boolean().optional(),
+  lastError: z.string().nullable().optional(),
+});
+
+/** Map a `GET /api/audio` response. */
+export function parseAudio(payload: unknown, origin: DataOrigin): AudioState {
+  const wire = audioWire.parse(payload);
+  const now = Date.now();
+  const endpoint = (
+    value: z.infer<typeof audioWire>["input"],
+    fallbackLabel: string,
+  ): AudioState["input"] =>
+    value
+      ? {
+          status: value.status,
+          label: value.label || fallbackLabel,
+          detail: value.detail ?? null,
+        }
+      : { status: "unknown", label: fallbackLabel, detail: "Non exposé par le backend." };
+
+  return {
+    input: endpoint(wire.input, "Entrée audio"),
+    output: endpoint(wire.output, "Sortie audio"),
+    capturing: wire.capturing ?? false,
+    playing: wire.playing ?? false,
+    levelDbfs: wire.levelDbfs ?? null,
+    volume: wire.volume ?? null,
+    volumeControllable: wire.volumeControllable ?? false,
+    lastError: wire.lastError ?? null,
+    fetchedAt: now,
+    origin,
   };
 }
 

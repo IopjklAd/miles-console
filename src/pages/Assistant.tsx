@@ -34,6 +34,7 @@ import {
   useConversations,
 } from "@/hooks/use-conversations";
 import { cn } from "@/lib/utils";
+import { useMiles } from "@/state/miles";
 import { useSettings } from "@/state/settings";
 import { motion } from "framer-motion";
 import {
@@ -56,6 +57,7 @@ const SUGGESTIONS = [
 export default function Assistant() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { settings } = useSettings();
+  const { pushNotification } = useMiles();
   const { user } = useAuth();
   const { conversations, create } = useConversations();
   const [input, setInput] = useState("");
@@ -102,7 +104,16 @@ export default function Assistant() {
       if (textareaRef.current) textareaRef.current.style.height = "auto";
       setSearchParams({ c: id }, { replace: true });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Envoi impossible.");
+      const message =
+        error instanceof Error ? error.message : "Envoi impossible.";
+      toast.error(message);
+      pushNotification({
+        title: "Erreur de l'assistant IA",
+        message,
+        severity: "error",
+        dedupeKey: "ai:send-failed",
+        origin: "app",
+      });
     } finally {
       setSending(false);
     }

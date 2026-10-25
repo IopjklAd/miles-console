@@ -15,14 +15,17 @@ import {
 import type { MilesApi } from "./contract";
 import { requestBackend, withQuery } from "./client";
 import {
+  parseAudio,
   parseCapabilities,
   parseCommandResponse,
   parseLogs,
   parseRobotState,
   parseSensorHistory,
   parseSensors,
+  parseServices,
   parseSettings,
   parseStatus,
+  parseVision,
 } from "./schema";
 
 export const liveApi: MilesApi = {
@@ -85,6 +88,66 @@ export const liveApi: MilesApi = {
 
   getSettings: () =>
     requestBackend(API_ENDPOINTS.settings, {}, (data) => parseSettings(data)),
+
+  getServices: () =>
+    requestBackend(API_ENDPOINTS.services, {}, (data) =>
+      parseServices(data, "live"),
+    ),
+
+  serviceCommand: async (input) => {
+    const sentAt = Date.now();
+    const commandId = `svc-${sentAt.toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 7)}`;
+    return requestBackend(
+      API_ENDPOINTS.serviceCommand,
+      {
+        method: "POST",
+        body: { commandId, serviceId: input.serviceId, action: input.action },
+      },
+      (data) =>
+        parseCommandResponse(data, {
+          commandId,
+          capabilityId: `${input.serviceId}:${input.action}`,
+          label: input.label,
+          sentAt,
+          origin: "live",
+        }),
+    );
+  },
+
+  getVision: () =>
+    requestBackend(API_ENDPOINTS.vision, {}, (data) => parseVision(data, "live")),
+
+  visionCommand: async (action) => {
+    const sentAt = Date.now();
+    const commandId = `vis-${sentAt.toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 7)}`;
+    return requestBackend(
+      API_ENDPOINTS.visionCommand,
+      { method: "POST", body: { commandId, action } },
+      (data) =>
+        parseCommandResponse(data, {
+          commandId,
+          capabilityId: `stream:${action}`,
+          label: action === "start" ? "Démarrer le flux" : "Arrêter le flux",
+          sentAt,
+          origin: "live",
+        }),
+    );
+  },
+
+  getAudio: () =>
+    requestBackend(API_ENDPOINTS.audio, {}, (data) => parseAudio(data, "live")),
+
+  setVolume: (percent) =>
+    requestBackend(
+      API_ENDPOINTS.audioVolume,
+      { method: "POST", body: { volume: Math.round(percent) } },
+      () => undefined,
+    ),
+
 
   saveSettings: async (settings) => {
     await requestBackend(

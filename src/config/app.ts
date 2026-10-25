@@ -26,6 +26,12 @@ export const API_ENDPOINTS = {
   robotCapabilities: "/api/robot/capabilities",
   robotCommands: "/api/robot/commands",
   settings: "/api/settings",
+  services: "/api/services",
+  serviceCommand: "/api/services/command",
+  vision: "/api/vision",
+  visionCommand: "/api/vision/command",
+  audio: "/api/audio",
+  audioVolume: "/api/audio/volume",
 } as const;
 
 export type ApiEndpoint = (typeof API_ENDPOINTS)[keyof typeof API_ENDPOINTS];

@@ -21,6 +21,7 @@ import { createMilesApi, describeError, type MilesApi } from "@/miles/api";
 import type {
   ApiMode,
   AppNotification,
+  Availability,
   DataOrigin,
   LogEntry,
   RobotCapability,
@@ -383,6 +384,76 @@ export function MilesProvider({ children }: { children: ReactNode }) {
       deferNotification(() => pushNotification(notification));
     }
   }, [connection, pushNotification, status.error]);
+
+  /* ---------------- component transitions ---------------- */
+
+  const prevComponents = useRef<Record<string, Availability> | null>(null);
+
+  useEffect(() => {
+    const current = status.data;
+    if (!current) return;
+
+    const entries = [
+      ["esp32", current.esp32],
+      ["vision", current.vision],
+      ["audio", current.audio],
+      ["services", current.services],
+      ["sensors", current.sensors],
+      ["ai", current.ai],
+    ] as const;
+
+    const snapshot: Record<string, Availability> = {};
+    for (const [key, component] of entries) snapshot[key] = component.status;
+
+    const previous = prevComponents.current;
+    prevComponents.current = snapshot;
+    if (!previous) return; // first payload only establishes the baseline
+
+    const DOWN_COPY: Record<string, { title: string; fallback: string }> = {
+      esp32: {
+        title: "Matériel injoignable",
+        fallback: "L'ESP32-S3 ne répond plus.",
+      },
+      vision: {
+        title: "Webcam inaccessible",
+        fallback: "Le service de vision ne répond plus.",
+      },
+      audio: {
+        title: "Audio indisponible",
+        fallback: "Le service audio ne répond plus.",
+      },
+      services: {
+        title: "Service arrêté",
+        fallback: "Un service logiciel de la pile MILES est arrêté.",
+      },
+      sensors: {
+        title: "Capteurs indisponibles",
+        fallback: "Les capteurs ne répondent plus.",
+      },
+      ai: {
+        title: "Fournisseur IA indisponible",
+        fallback: "Le fournisseur IA ne répond plus.",
+      },
+    };
+
+    for (const [key, component] of entries) {
+      const before = previous[key];
+      const after = snapshot[key];
+      const brokeDown =
+        (after === "down" || after === "unavailable") &&
+        before !== "down" &&
+        before !== "unavailable";
+      if (!brokeDown) continue;
+      const copy = DOWN_COPY[key];
+      pushNotification({
+        title: copy.title,
+        message: component.detail ?? copy.fallback,
+        severity: "error",
+        dedupeKey: `component:${key}:down`,
+        origin: component.origin,
+      });
+    }
+  }, [status.data, pushNotification]);
 
   /* -------------------------- thresholds -------------------------- */
 

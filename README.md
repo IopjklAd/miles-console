@@ -24,13 +24,16 @@ Pages réellement implémentées (navigation latérale) :
 | `/dashboard/assistant` | Assistant IA | Conversation, génération, interruption, réessai, copie, statut du fournisseur |
 | `/dashboard/conversations` | Conversations | Historique, recherche, renommage, suppression avec confirmation |
 | `/dashboard/capteurs` | Capteurs | Valeurs, validité, historique graphique, seuils, alertes |
+| `/dashboard/vision` | Vision | État webcam et flux, résolution, dernière image, commande démarrer/arrêt, détection IA déclarée indisponible |
+| `/dashboard/audio` | Audio | Entrées/sorties, niveau dBFS, volume (si contrôlable), capture/lecture, reconnaissance/synthèse indisponibles |
 | `/dashboard/journaux` | Journaux | Recherche, filtres niveau/source/période, copie, export |
 | `/dashboard/controle` | Contrôle de MILES | État, manifeste de capacités, commandes confirmées, résultats |
+| `/dashboard/services` | Services | États des processus, dernière activité/erreur/version, démarrer/arrêter/redémarrer (si le backend l'autorise) |
 | `/dashboard/parametres` | Paramètres | Général, source de données, connexion, IA, session |
 
 **Hors périmètre v1** (non listés dans la navigation, donc aucun lien mort) :
-vision/webcam, audio, page matériel détaillée, gestion des services, modèles IA
-détaillés, documentation intégrée, multi-utilisateur avancé.
+page matériel détaillée, modèles IA détaillés, documentation intégrée,
+multi-utilisateur avancé.
 
 ---
 
@@ -81,7 +84,20 @@ l'environnement : aucune commande de démarrage manuelle n'y est nécessaire.
 
 ## 4. Variables d'environnement
 
-Voir [`.env.example`](./.env.example).
+Aucun fichier `.env` n'est versionné ; voici le modèle complet à recopier dans
+`.env.local` (aucun secret à ces emplacements — la clé d'IA reste côté serveur
+Convex) :
+
+```bash
+# URL du déploiement Convex (fournie par la plateforme)
+VITE_CONVEX_URL=
+# Cible Convex locale pour `bunx convex dev`
+CONVEX_DEPLOYMENT=
+# Adresse du backend MILES — vide = mode démonstration (données simulées)
+VITE_MILES_API_BASE_URL=
+# Clé du fournisseur IA (serveur Convex uniquement, jamais dans le navigateur)
+VLY_INTEGRATION_KEY=
+```
 
 | Variable | Côté | Rôle |
 | --- | --- | --- |
@@ -112,7 +128,9 @@ src/
 │   ├── settings.tsx         # paramètres locaux + synchronisation PUT /api/settings
 │   ├── miles.tsx            # mode, connexion, unique boucle de polling, notifications
 │   └── console-providers.tsx
-├── hooks/                   # use-format, use-auth, use-conversations
+├── hooks/                   # use-format, use-auth, use-conversations, use-domain
+│                             # (use-domain : chargement à la demande des pages
+│                             #  services/vision/audio, hors boucle de polling)
 ├── components/
 │   ├── layout/              # AppShell, AppSidebar, AppHeader, ModeBanner, notifications
 │   ├── miles/               # Panel, PageHeader, StatusBadge, Feedback, LogoMark
@@ -145,6 +163,16 @@ aujourd'hui `not_configured` tant que `VITE_MILES_API_BASE_URL` est vide.
 | GET | `/api/robot/capabilities` | Manifeste des commandes réellement possibles |
 | POST | `/api/robot/commands` | `{ commandId, capabilityId }` → accusé de réception |
 | GET/PUT | `/api/settings` | Paramètres persistés + test de connexion |
+| GET | `/api/services` | Liste des services : état, version, dernière activité/erreur, `controllable` |
+| POST | `/api/services/command` | `{ commandId, serviceId, action: start\|stop\|restart }` → accusé de réception |
+| GET | `/api/vision` | Webcam, flux (`idle\|starting\|live\|error`), résolution, `snapshotUrl`, `controllable` |
+| POST | `/api/vision/command` | `{ commandId, action: start\|stop }` → accusé de réception |
+| GET | `/api/audio` | Entrées/sorties, capture/lecture, `levelDbfs`, `volume`, `volumeControllable` |
+| POST | `/api/audio/volume` | `{ volume: 0–100 }` → réglage appliqué côté serveur |
+
+Les trois derniers paires GET/POST sont **attendues du backend** : aujourd'hui
+seule la démonstration les répond, et le mode réel affiche « indisponible »
+plutôt que de simuler.
 
 Exemple de réponse `/api/status` (les champs absents deviennent « Non exposé ») :
 
@@ -225,16 +253,16 @@ réservée aux sessions authentifiées.
 bun test
 ```
 
-7 fichiers, 47 tests :
+7 fichiers, 62 tests :
 
 | Fichier | Couverture |
 | --- | --- |
 | `src/lib/format.test.ts` | formatage durée/pourcent/heure, « Indisponible » pour valeur absente |
 | `src/miles/api/client.test.ts` | refus sans backend, codes d'erreur, message explicites, query string |
-| `src/miles/api/schema.test.ts` | validation zod, détection « stale », **une commande sans statut reste « envoyée »** |
-| `src/miles/api/demo.test.ts` | origine `demo` partout, ordre des journaux, fenêtre d'historique, absence de commandes de déplacement, cycle commande/état |
+| `src/miles/api/schema.test.ts` | validation zod, détection « stale », **une commande sans statut reste « envoyée »**, parseurs `services`/`vision`/`audio` (défauts, rejets de payloads invalides) |
+| `src/miles/api/demo.test.ts` | origine `demo` partout, ordre des journaux, fenêtre d'historique, absence de commandes de déplacement, cycle commande/état, **flux vision cohérent avec le service, volume borné** |
 | `src/components/miles/StatusBadge.test.tsx` | rendu Markdown, badges lisibles sans se fier à la couleur |
-| `src/components/layout/AppSidebar.test.tsx` | navigation complète v1, aucun lien vers un module absent |
+| `src/components/layout/AppSidebar.test.tsx` | navigation complète (10 destinations), aucune entrée vers un module absent |
 | `src/state/settings.test.tsx` | repli sur les défauts si stockage corrompu, persistance des seuils |
 
 ---
@@ -264,8 +292,10 @@ bun test
 3. **Authentification backend absente** : le backend MILES n'expose pas de
    mécanisme d'authentification documenté (limitation documentée dans
    Paramètres → Sécurité).
-4. **Webcam/audio/services/hors v1** : l'état de ces domaines n'apparaît que
-   sur le tableau de bord, depuis `/api/status`.
+4. **Endpoints services/vision/audio non encore servis** : les routes
+   `/api/services`, `/api/vision` et `/api/audio` sont contractées et
+   affichées par les pages dédiées, mais aucun backend ne les expose encore ;
+   en mode réel elles répondent « indisponible », jamais une valeur simulée.
 5. **Pas de temps réel continu** : les données sont actualisées par
    interrogation périodique, pas par WebSocket (architecturé pour l'ajouter :
    `state/miles.tsx`).

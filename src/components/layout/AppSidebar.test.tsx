@@ -14,10 +14,13 @@ import { SettingsProvider } from "@/state/settings";
 const NAV: Array<[href: string, label: string]> = [
   ["/dashboard", "Vue d'ensemble"],
   ["/dashboard/capteurs", "Capteurs"],
+  ["/dashboard/vision", "Vision"],
+  ["/dashboard/audio", "Audio"],
   ["/dashboard/journaux", "Journaux"],
   ["/dashboard/assistant", "Assistant IA"],
   ["/dashboard/conversations", "Conversations"],
   ["/dashboard/controle", "Contrôle de MILES"],
+  ["/dashboard/services", "Services"],
   ["/dashboard/parametres", "Paramètres"],
 ];
 
@@ -58,9 +61,11 @@ describe("AppSidebar", () => {
       .getAllByRole("link")
       .map((element) => element.getAttribute("href"));
 
-    expect(hrefs).not.toContain("/dashboard/vision");
-    expect(hrefs).not.toContain("/dashboard/audio");
+    // Vision, audio et services existent désormais (pages §9/§10/§12) ; le
+    // matériel lui n'a pas encore de page et ne doit pas apparaître.
+    expect(hrefs).toContain("/dashboard/vision");
+    expect(hrefs).toContain("/dashboard/audio");
+    expect(hrefs).toContain("/dashboard/services");
     expect(hrefs).not.toContain("/dashboard/materiel");
-    expect(hrefs).not.toContain("/dashboard/services");
   });
 });
