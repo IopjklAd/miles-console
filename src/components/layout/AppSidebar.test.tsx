@@ -17,7 +17,7 @@ const NAV: Array<[href: string, label: string]> = [
   ["/dashboard/journaux", "Journaux"],
   ["/dashboard/assistant", "Assistant IA"],
   ["/dashboard/conversations", "Conversations"],
-  ["/dashboard/controle", "Contrôle du robot"],
+  ["/dashboard/controle", "Contrôle de MILES"],
   ["/dashboard/parametres", "Paramètres"],
 ];
 

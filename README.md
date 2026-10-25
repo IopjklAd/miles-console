@@ -25,7 +25,7 @@ Pages réellement implémentées (navigation latérale) :
 | `/dashboard/conversations` | Conversations | Historique, recherche, renommage, suppression avec confirmation |
 | `/dashboard/capteurs` | Capteurs | Valeurs, validité, historique graphique, seuils, alertes |
 | `/dashboard/journaux` | Journaux | Recherche, filtres niveau/source/période, copie, export |
-| `/dashboard/controle` | Contrôle du robot | État, manifeste de capacités, commandes confirmées, résultats |
+| `/dashboard/controle` | Contrôle de MILES | État, manifeste de capacités, commandes confirmées, résultats |
 | `/dashboard/parametres` | Paramètres | Général, source de données, connexion, IA, session |
 
 **Hors périmètre v1** (non listés dans la navigation, donc aucun lien mort) :

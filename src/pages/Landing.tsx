@@ -397,7 +397,7 @@ export default function Landing() {
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground">
             Connectez-vous pour accéder au tableau de bord, à l'assistant, aux
-            capteurs, aux journaux et au contrôle du robot.
+            capteurs, aux journaux et au contrôle de MILES.
           </p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <Button size="lg" className="cursor-pointer gap-2" onClick={openConsole}>

@@ -96,7 +96,7 @@ const DEMO_CAPABILITIES: RobotCapability[] = [
   {
     id: "watch_enable",
     label: "Activer le mode surveillance",
-    description: "Passe le robot en mode surveillance (effet physique simulé).",
+    description: "Passe MILES en mode surveillance (effet physique simulé).",
     kind: "mode",
     requiresConfirmation: true,
     enabled: true,

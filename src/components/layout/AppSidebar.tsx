@@ -2,7 +2,7 @@
  * Persistent navigation of the console.
  *
  * Groups are stable for version 1: supervision (dashboard, sensors, logs),
- * piloting (assistant, conversations, robot control) and system (settings).
+ * piloting (assistant, conversations, MILES control) and system (settings).
  * Pages that are not implemented yet are simply not listed — no dead links.
  */
 
@@ -57,7 +57,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { to: "/dashboard/assistant", label: "Assistant IA", icon: Bot },
       { to: "/dashboard/conversations", label: "Conversations", icon: MessagesSquare },
-      { to: "/dashboard/controle", label: "Contrôle du robot", icon: Gamepad2 },
+      { to: "/dashboard/controle", label: "Contrôle de MILES", icon: Gamepad2 },
     ],
   },
   {

@@ -1,5 +1,5 @@
 /**
- * Contrôle du robot.
+ * Contrôle de MILES.
  *
  * Commands are driven by the backend capability manifest: with no manifest
  * reachable, no button is enabled. Every command shows its full lifecycle —
@@ -161,7 +161,7 @@ export default function Control() {
       className="flex flex-col gap-4"
     >
       <PageHeader
-        title="Contrôle du robot"
+        title="Contrôle de MILES"
         description="Les commandes proviennent du manifeste exposé par le backend ; aucune commande n'est inventée par l'interface."
         actions={
           <Button
@@ -185,7 +185,7 @@ export default function Control() {
         <Panel>
           <PanelHeader>
             <div>
-              <PanelTitle>État du robot</PanelTitle>
+              <PanelTitle>État de MILES</PanelTitle>
               <PanelDescription>
                 Relevé du backend — l'envoi d'une commande ne garantit jamais
                 son exécution.
@@ -195,7 +195,7 @@ export default function Control() {
           </PanelHeader>
           <PanelBody>
             {robotState.loading && !state ? (
-              <LoadingState label="Lecture de l'état du robot…" />
+              <LoadingState label="Lecture de l'état de MILES…" />
             ) : robotState.error && !state ? (
               <ErrorState message={robotState.error} onRetry={refresh} />
             ) : state ? (
