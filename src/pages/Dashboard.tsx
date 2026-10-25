@@ -1,55 +1,102 @@
+/**
+ * Vue d'ensemble — first screen of the console.
+ *
+ * Answers three questions immediately: is the system fine, where does the
+ * data come from, and what happened recently.
+ */
+
+import { ActivityTimeline } from "@/components/dashboard/ActivityTimeline";
+import { MetricsPanel } from "@/components/dashboard/MetricsPanel";
+import { QuickActions } from "@/components/dashboard/QuickActions";
+import { StatusCards } from "@/components/dashboard/StatusCards";
+import { ErrorState, LoadingState } from "@/components/miles/Feedback";
+import { PageHeader } from "@/components/miles/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAuth } from "@/hooks/use-auth";
-import { LayoutDashboard, LogOut } from "lucide-react";
-import { useNavigate } from "react-router";
+import { useFormat } from "@/hooks/use-format";
+import { cn } from "@/lib/utils";
+import { useMiles } from "@/state/miles";
+import { useSettings } from "@/state/settings";
+import { motion } from "framer-motion";
+import { RefreshCw } from "lucide-react";
 
 export default function Dashboard() {
-  const { user, signOut } = useAuth();
-  const navigate = useNavigate();
+  const { status, refresh, refreshing, lastUpdate } = useMiles();
+  const { settings } = useSettings();
+  const format = useFormat();
 
-  const handleSignOut = async () => {
-    await signOut();
-    navigate("/");
-  };
+  let body: React.ReactNode;
+
+  if (status.data) {
+    body = (
+      <div className="flex flex-col gap-6">
+        <StatusCards status={status.data} />
+        <MetricsPanel status={status.data} />
+      </div>
+    );
+  } else if (status.error) {
+    body = (
+      <ErrorState
+        message={status.error}
+        onRetry={refresh}
+        retryLabel="Réessayer la connexion"
+      />
+    );
+  } else {
+    body = <LoadingState label="Interrogation du système…" />;
+  }
 
   return (
-    <main className="min-h-screen bg-background px-6 py-10 text-foreground">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">
-              Authenticated workspace
-            </p>
-            <h1 className="mt-1 text-3xl font-bold tracking-tight">
-              Welcome{user?.name ? `, ${user.name}` : ""}
-            </h1>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            className="cursor-pointer gap-2 self-start"
-            onClick={handleSignOut}
-          >
-            <LogOut className="size-4" />
-            Sign out
-          </Button>
-        </header>
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
+      className="flex flex-col gap-6"
+    >
+      <PageHeader
+        title="Vue d'ensemble"
+        description={
+          <span>
+            État de{" "}
+            <span className="font-medium text-foreground">
+              {settings.systemName}
+            </span>
+            {" · "}
+            {lastUpdate
+              ? `mise à jour ${format.relative(lastUpdate)}`
+              : "en attente de la première réponse"}
+          </span>
+        }
+        actions={
+          <>
+            {lastUpdate ? (
+              <span className="mono-value hidden text-xs text-muted-foreground sm:inline">
+                {format.dateTime(lastUpdate)}
+              </span>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="cursor-pointer gap-2"
+              onClick={refresh}
+              disabled={refreshing}
+            >
+              <RefreshCw
+                className={cn("size-4", refreshing && "animate-spin")}
+                aria-hidden
+              />
+              Actualiser
+            </Button>
+          </>
+        }
+      />
 
-        <Card className="border-border/70 shadow-none">
-          <CardHeader>
-            <div className="mb-3 flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <LayoutDashboard className="size-5" />
-            </div>
-            <CardTitle>Your dashboard is ready</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm leading-6 text-muted-foreground">
-            Replace this starter content with the product&apos;s authenticated
-            experience. The route is protected and sign-in returns here by
-            default.
-          </CardContent>
-        </Card>
+      {body}
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <ActivityTimeline className="lg:col-span-2" />
+        <QuickActions />
       </div>
-    </main>
+    </motion.div>
   );
 }

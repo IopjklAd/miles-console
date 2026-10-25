@@ -32,7 +32,35 @@ const schema = defineSchema(
       role: v.optional(roleValidator), // role of the user. do not remove
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
-    // add other tables here
+    // Conversations with the MILES assistant, persisted server-side.
+    conversations: defineTable({
+      userId: v.string(),
+      title: v.string(),
+      /** Preview of the last message, shown in the history list. */
+      preview: v.optional(v.string()),
+      /** Model requested for the next reply. */
+      model: v.optional(v.string()),
+      updatedAt: v.number(),
+    }).index("by_user", ["userId", "updatedAt"]),
+
+    messages: defineTable({
+      conversationId: v.id("conversations"),
+      userId: v.string(),
+      role: v.union(v.literal("user"), v.literal("assistant")),
+      content: v.string(),
+      /** pending → the AI action is running; error/cancelled are retryable. */
+      status: v.union(
+        v.literal("pending"),
+        v.literal("complete"),
+        v.literal("error"),
+        v.literal("cancelled"),
+      ),
+      model: v.optional(v.string()),
+      latencyMs: v.optional(v.number()),
+      error: v.optional(v.string()),
+      promptTokens: v.optional(v.number()),
+      completionTokens: v.optional(v.number()),
+    }).index("by_conversation", ["conversationId"]),
 
     // tableName: defineTable({
     //   ...
