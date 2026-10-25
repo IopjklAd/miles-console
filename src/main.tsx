@@ -1,6 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
+import { prefetchAllRoutes, routeLoaders, shellLoaders } from "./lib/route-loaders";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
 import { ThemeProvider } from "next-themes";
@@ -10,20 +11,21 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 
 // Lazy load route components for better code splitting.
-// Keep this list in sync with the navigation entries in AppSidebar.
-const Landing = lazy(() => import("./pages/Landing.tsx"));
-const AuthPage = lazy(() => import("./pages/Auth.tsx"));
-const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
-const Assistant = lazy(() => import("./pages/Assistant.tsx"));
-const Conversations = lazy(() => import("./pages/Conversations.tsx"));
-const Control = lazy(() => import("./pages/Control.tsx"));
-const Sensors = lazy(() => import("./pages/Sensors.tsx"));
-const Logs = lazy(() => import("./pages/Logs.tsx"));
-const Settings = lazy(() => import("./pages/Settings.tsx"));
-const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+// Loaders live in src/lib/route-loaders.ts so the prefetcher can warm the same
+// chunks the router will use (keep this list in sync with AppSidebar).
+const Landing = lazy(routeLoaders.landing);
+const AuthPage = lazy(routeLoaders.auth);
+const Dashboard = lazy(routeLoaders.dashboard);
+const Assistant = lazy(routeLoaders.assistant);
+const Conversations = lazy(routeLoaders.conversations);
+const Control = lazy(routeLoaders.control);
+const Sensors = lazy(routeLoaders.sensors);
+const Logs = lazy(routeLoaders.logs);
+const Settings = lazy(routeLoaders.settings);
+const NotFound = lazy(routeLoaders.notFound);
 
-const ConsoleProviders = lazy(() => import("./state/console-providers.tsx").then((m) => ({ default: m.ConsoleProviders })));
-const AppShell = lazy(() => import("./components/layout/AppShell.tsx").then((m) => ({ default: m.AppShell })));
+const ConsoleProviders = lazy(shellLoaders.consoleProviders);
+const AppShell = lazy(shellLoaders.appShell);
 
 // Simple loading fallback for route transitions
 function RouteLoading() {
@@ -178,3 +180,12 @@ createRoot(document.getElementById("root")!).render(
     </RootErrorBoundary>
   </StrictMode>,
 );
+
+// Warm every route chunk once the app is idle: navigation then needs no
+// network round-trip (and warms the dev server's transform cache too).
+const warmRoutes = () => prefetchAllRoutes();
+if (typeof window.requestIdleCallback === "function") {
+  window.requestIdleCallback(warmRoutes, { timeout: 4000 });
+} else {
+  window.setTimeout(warmRoutes, 2000);
+}

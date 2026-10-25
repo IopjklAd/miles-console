@@ -22,6 +22,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { prefetchRoute, routeKeyForPath } from "@/lib/route-loaders";
 import { useMiles } from "@/state/miles";
 import {
   Bot,
@@ -101,6 +102,11 @@ function StatusFooter() {
   );
 }
 
+function prefetchRouteByKey(pathname: string) {
+  const key = routeKeyForPath(pathname);
+  if (key) prefetchRoute(key);
+}
+
 export function AppSidebar() {
   const location = useLocation();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -140,6 +146,11 @@ export function AppSidebar() {
                         <NavLink
                           to={item.to}
                           end={item.end}
+                          // Warm the target chunk on intent (hover, focus,
+                          // touch) so the click swaps pages synchronously.
+                          onPointerEnter={() => prefetchRouteByKey(item.to)}
+                          onPointerDown={() => prefetchRouteByKey(item.to)}
+                          onFocus={() => prefetchRouteByKey(item.to)}
                           onClick={() => {
                             if (isMobile) setOpenMobile(false);
                           }}

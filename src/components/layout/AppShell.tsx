@@ -33,9 +33,9 @@ function RouteTransition({
   return (
     <motion.div
       key={pathname}
-      initial={{ opacity: 0.4 }}
+      initial={{ opacity: 0.55 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.18, ease: "easeOut" }}
+      transition={{ duration: 0.12, ease: "easeOut" }}
     >
       {children}
     </motion.div>
