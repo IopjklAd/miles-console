@@ -114,6 +114,9 @@ function readInitialMode(): ApiMode {
 
 const DEDUPE_WINDOW_MS = 10 * 60_000;
 
+/** The capability manifest changes rarely: refresh it at most every minute. */
+const CAPS_REFRESH_MS = 60_000;
+
 /** Push a notification outside the render/effect commit (state-in-effect rule). */
 function deferNotification(task: () => void): void {
   window.setTimeout(task, 0);
@@ -139,6 +142,9 @@ export function MilesProvider({ children }: { children: ReactNode }) {
   const [lastUpdate, setLastUpdate] = useState<number | null>(null);
   const [manualTick, setManualTick] = useState(0);
   const inFlight = useRef(false);
+  const lastLogsFetchAt = useRef(0);
+  const lastCapsFetchAt = useRef(0);
+  const tickRef = useRef<(() => void) | null>(null);
 
   const pushNotification = useCallback((input: NotificationInput) => {
     setNotifications((previous) => {
@@ -193,6 +199,11 @@ export function MilesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
+    // Each effect cycle (mount, mode change, interval change, manual refresh)
+    // performs a full read; lighter domains are throttled between cycles.
+    lastLogsFetchAt.current = 0;
+    lastCapsFetchAt.current = 0;
+
     const applyResult = <T,>(
       result: PromiseSettledResult<T>,
       setter: Dispatch<SetStateAction<DomainState<T>>>,
@@ -217,21 +228,74 @@ export function MilesProvider({ children }: { children: ReactNode }) {
       if (inFlight.current) return;
       inFlight.current = true;
       setRefreshing(true);
+      const startedAt = Date.now();
+
+      // Status, sensors and robot state drive freshness-critical UI: read every
+      // cycle. Logs change slower (2 cycles) and the capability manifest very
+      // rarely (60 s) — fewer parallel requests means a shorter tick and less
+      // load on a future real backend.
+      const wantLogs =
+        startedAt - lastLogsFetchAt.current >= settings.pollIntervalMs * 2;
+      const wantCaps = startedAt - lastCapsFetchAt.current >= CAPS_REFRESH_MS;
+
       try {
-        const [statusResult, sensorsResult, logsResult, robotResult, capsResult] =
-          await Promise.allSettled([
-            api.getStatus(),
-            api.getSensors(),
-            api.getLogs(),
-            api.getRobotState(),
-            api.getRobotCapabilities(),
-          ]);
+        const [
+          statusResult,
+          sensorsResult,
+          robotResult,
+          logsResult,
+          capsResult,
+        ] = await Promise.allSettled([
+          api.getStatus(),
+          api.getSensors(),
+          api.getRobotState(),
+          wantLogs ? api.getLogs() : Promise.resolve(null),
+          wantCaps ? api.getRobotCapabilities() : Promise.resolve(null),
+        ]);
         if (cancelled) return;
+
         applyResult(statusResult, setStatus);
         applyResult(sensorsResult, setSensors);
-        applyResult(logsResult, setLogs);
         applyResult(robotResult, setRobotState);
-        applyResult(capsResult, setCapabilities);
+
+        if (logsResult.status === "fulfilled") {
+          lastLogsFetchAt.current = startedAt;
+          if (logsResult.value) {
+            setLogs({
+              data: logsResult.value,
+              error: null,
+              loading: false,
+              updatedAt: Date.now(),
+            });
+          }
+        } else {
+          lastLogsFetchAt.current = startedAt;
+          setLogs((previous) => ({
+            ...previous,
+            error: describeError(logsResult.reason),
+            loading: false,
+          }));
+        }
+
+        if (capsResult.status === "fulfilled") {
+          lastCapsFetchAt.current = startedAt;
+          if (capsResult.value) {
+            setCapabilities({
+              data: capsResult.value,
+              error: null,
+              loading: false,
+              updatedAt: Date.now(),
+            });
+          }
+        } else {
+          lastCapsFetchAt.current = startedAt;
+          setCapabilities((previous) => ({
+            ...previous,
+            error: describeError(capsResult.reason),
+            loading: false,
+          }));
+        }
+
         // "Last update" only advances on a successful status read, so a failing
         // backend never looks like a fresh measurement.
         if (statusResult.status === "fulfilled") setLastUpdate(Date.now());
@@ -241,11 +305,24 @@ export function MilesProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    void tick();
-    const interval = window.setInterval(() => void tick(), settings.pollIntervalMs);
+    const runTick = () => void tick();
+    tickRef.current = runTick;
+    runTick();
+
+    const interval = window.setInterval(runTick, settings.pollIntervalMs);
+
+    // Coming back to the tab refreshes at once instead of waiting for the next
+    // cycle (staleness after a tab switch: up to one interval → ~0).
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") tickRef.current?.();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (tickRef.current === runTick) tickRef.current = null;
     };
   }, [api, settings.pollIntervalMs, manualTick]);
 

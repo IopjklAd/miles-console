@@ -9,8 +9,25 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { useFormat } from "@/hooks/use-format";
 import type { ConversationMessage } from "@/hooks/use-conversations";
 import { Bot, Check, Copy, Loader2, RotateCcw, User } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+
+/**
+ * Live elapsed time of a pending generation (updates every 500 ms).
+ * Starts at 0 s on the first frame: no impure clock call during render and no
+ * synchronous setState inside the effect.
+ */
+function Elapsed({ from }: { from: number }) {
+  const [now, setNow] = useState(0);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const seconds = now === 0 ? 0 : Math.max(0, Math.round((now - from) / 1000));
+  return <span className="mono-value">{seconds} s</span>;
+}
 
 export function AssistantMessage({
   message,
@@ -53,7 +70,7 @@ export function AssistantMessage({
           {message.status === "pending" ? (
             <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <Loader2 className="size-3 animate-spin" aria-hidden />
-              Génération en cours…
+              Génération en cours… · <Elapsed from={message._creationTime} />
             </span>
           ) : null}
         </div>

@@ -91,7 +91,21 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+// Warm up the connection to the Convex deployment before React mounts, so the
+// first auth/data queries don't pay DNS + TLS setup themselves.
+const convexUrl = import.meta.env.VITE_CONVEX_URL as string;
+if (convexUrl) {
+  try {
+    const link = document.createElement("link");
+    link.rel = "preconnect";
+    link.href = new URL(convexUrl).origin;
+    link.crossOrigin = "";
+    document.head.appendChild(link);
+  } catch {
+    // Invalid URL: ConvexReactClient below reports it properly.
+  }
+}
+const convex = new ConvexReactClient(convexUrl);
 
 function RouteSyncer() {
   const location = useLocation();
