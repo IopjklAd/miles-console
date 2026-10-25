@@ -62,6 +62,14 @@ const schema = defineSchema(
       completionTokens: v.optional(v.number()),
     }).index("by_conversation", ["conversationId"]),
 
+    // Fixed-window counters for AI spending (see rateLimit.ts). Keyed by
+    // "<kind>:<userId>" so anonymous sessions are limited like any other.
+    rateLimits: defineTable({
+      key: v.string(),
+      windowStart: v.number(),
+      count: v.number(),
+    }).index("by_key", ["key"]),
+
     // tableName: defineTable({
     //   ...
     //   // table fields

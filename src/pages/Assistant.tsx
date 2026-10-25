@@ -97,12 +97,17 @@ export default function Assistant() {
 
     setSending(true);
     try {
-      let id = activeId;
-      if (!id) id = await create({});
-      await post({ conversationId: id, content, model: settings.aiModel });
+      // `??` keeps a non-null id in scope: no control-flow narrowing needed
+      // after the await (typecheck fails otherwise).
+      const conversationId = activeId ?? (await create({}));
+      await post({
+        conversationId,
+        content,
+        model: settings.aiModel,
+      });
       setInput("");
       if (textareaRef.current) textareaRef.current.style.height = "auto";
-      setSearchParams({ c: id }, { replace: true });
+      setSearchParams({ c: conversationId }, { replace: true });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Envoi impossible.";

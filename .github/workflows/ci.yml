@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  verify:
+    name: Tests, typecheck, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Installation reproductible : le lockfile (bun.lock) fait foi.
+      - name: Installer les dépendances
+        run: bun install --frozen-lockfile
+
+      # src/convex/_generated est ignoré par git : les types Convex doivent
+      # être régénérés à chaque clone (fonctionne hors ligne, sans déploiement).
+      - name: Générer les types Convex
+        run: bunx convex codegen
+
+      - name: Tests (Vitest)
+        run: bun run test
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      # Tolérant : `bun run lint` sort en code 1 à cause de 3 erreurs et
+      # 25 warnings PRÉEXISTANTS du template (ui/carousel.tsx:96,
+      # ui/sidebar.tsx:611, hooks/use-mobile.ts:14), aucun n'étant imputable
+      # au code applicatif. À resserrer dès que le template est nettoyé.
+      - name: Lint (tolérant — erreurs préexistantes du template)
+        run: bun run lint
+        continue-on-error: true
+
+      - name: Build de production
+        run: bun run build

@@ -20,6 +20,10 @@ import {
   DEFAULT_TITLE,
   MAX_MESSAGE_LENGTH,
 } from "./aiConfig";
+import {
+  AI_GENERATION_LIMIT,
+  enforceOrThrow,
+} from "./rateLimit";
 
 function buildTitle(content: string): string {
   const compact = content.replace(/\s+/g, " ").trim();
@@ -160,6 +164,15 @@ export const postMessage = mutation({
       throw new Error("Conversation introuvable.");
     }
 
+    // Spending guard: every send schedules a provider call. Same bucket for
+    // retries, so a loop of relances cannot bypass the limit.
+    await enforceOrThrow(
+      ctx,
+      `ai:gen:${userId}`,
+      AI_GENERATION_LIMIT.limit,
+      AI_GENERATION_LIMIT.windowMs,
+    );
+
     const now = Date.now();
 
     await ctx.db.insert("messages", {
@@ -233,6 +246,14 @@ export const retryMessage = mutation({
     if (message.status !== "error" && message.status !== "cancelled") {
       throw new Error("Cette réponse ne peut pas être relancée.");
     }
+
+    // Retries spend provider tokens like a fresh send: same bucket.
+    await enforceOrThrow(
+      ctx,
+      `ai:gen:${userId}`,
+      AI_GENERATION_LIMIT.limit,
+      AI_GENERATION_LIMIT.windowMs,
+    );
 
     await ctx.db.patch(messageId, { status: "pending" });
     await ctx.db.patch(message.conversationId, { updatedAt: Date.now() });

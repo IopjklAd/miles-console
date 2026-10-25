@@ -1,4 +1,9 @@
+# Environnement — aucun secret versionné (le modèle .env.example reste suivi)
+.env
+.env.*
+!.env.example
 .env.local
+
 node_modules
 dist
 src/convex/_generated

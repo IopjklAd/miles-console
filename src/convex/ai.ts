@@ -8,7 +8,8 @@
  *
  * - keys are read from the deployment environment, never sent to the browser;
  * - `generate` is an internal action scheduled by a mutation (already
- *   authenticated and rate-checked there);
+ *   authenticated and rate-checked there — see rateLimit.ts);
+ * - `probe` is throttled server-side per identity before any provider call;
  * - provider failures are mapped to explicit messages with credentials
  *   stripped, and a reply produced after the user pressed "stop" is dropped.
  */
@@ -27,6 +28,7 @@ import {
   isAllowedModel,
   sanitizeError,
 } from "./aiConfig";
+import { AI_PROBE_LIMIT } from "./rateLimit";
 
 interface ProviderResult {
   ok: boolean;
@@ -180,13 +182,31 @@ export const status = action({
  * Live connectivity test of the provider (one minimal completion).
  * Requires a session so a public caller cannot trigger it anonymously.
  */
+/** Explicit so the return type never depends on `internal` (type cycle). */
+export type ProbeResult =
+  | { ok: true; model: string; latencyMs: number; sample: string }
+  | { ok: false; error: string; latencyMs?: number };
+
 export const probe = action({
   args: {},
-  handler: async (ctx: ActionCtx) => {
+  handler: async (ctx: ActionCtx): Promise<ProbeResult> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       return { ok: false as const, error: "Authentification requise." };
     }
+
+    // Each probe is a real completion: throttle it server-side per identity
+    // (anonymous sessions included) BEFORE contacting the provider.
+    const rate: { ok: boolean; retryAfterMs: number; message: string } =
+      await ctx.runMutation(internal.rateLimit.consume, {
+      key: `ai:probe:${identity.subject}`,
+      limit: AI_PROBE_LIMIT.limit,
+      windowMs: AI_PROBE_LIMIT.windowMs,
+    });
+    if (!rate.ok) {
+      return { ok: false as const, error: rate.message };
+    }
+
     if (!hasIntegrationKey()) {
       return {
         ok: false as const,

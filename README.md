@@ -68,6 +68,30 @@ bun run dev                # http://localhost:5173
 Sur la plateforme Freebuff, le serveur de dev et `convex dev` sont gérés par
 l'environnement : aucune commande de démarrage manuelle n'y est nécessaire.
 
+### Hors de Freebuff : les trois services à prévoir
+
+1. **Convex (obligatoire)** — `bunx convex dev` crée ou cible un déploiement.
+   Variables : `CONVEX_DEPLOYMENT`, `VITE_CONVEX_URL`, et **`CONVEX_SITE_URL`**
+   (`bunx convex env set CONVEX_SITE_URL https://votre-domaine`) : Convex Auth
+   s'y accroche pour l'OIDC discovery ; sans cette variable, la connexion par
+   e-mail ne confirme jamais.
+2. **Envoi d'e-mails OTP** — `src/convex/auth/emailOtp.ts` poste les codes via
+   la passerelle d'intégration (`VLY_INTEGRATION_BASE_URL`, défaut
+   `https://integrations.vly.ai`, authentifiée par `VLY_INTEGRATION_KEY`).
+   Options si vous n'avez pas cette passerelle (à choisir, **aucune n'est
+   appliquée ici**) : fournisseur transactionnel (Resend, SendGrid, Mailgun)
+   dans `sendVerificationRequest`, ou SMTP via `nodemailer` — le provider
+   Convex Auth `Email` est déjà en place, seul l'envoi change.
+3. **Fournisseur IA** — `VLY_INTEGRATION_KEY`, côté serveur Convex :
+   `bunx convex env set VLY_INTEGRATION_KEY …`. Option documentée pour s'en
+   passer : remplacer l'appel `vly.ai.completion` dans `src/convex/ai.ts`
+   (seul fichier fournisseur) par l'API de votre choix ; la liste de modèles
+   exposée à l'UI vit dans `src/convex/aiConfig.ts`. Substitution non appliquée
+   ici.
+
+La variable métier `VITE_MILES_API_BASE_URL` reste vide tant qu'aucun backend
+matériel n'existe → mode démonstration.
+
 ### Commandes
 
 | Commande | Rôle |
@@ -76,7 +100,7 @@ l'environnement : aucune commande de démarrage manuelle n'y est nécessaire.
 | `bunx convex dev` | Backend Convex + codegen (`_generated`) |
 | `bunx convex dev --once` | Codegen unique (CI / vérification) |
 | `bun run typecheck` | `tsc -b --noEmit` |
-| `bun test` | `vitest run` (47 tests) |
+| `bun run test` | `vitest run` (70 tests ; **pas** `bun test`, voir §9) |
 | `bun run lint` | ESLint |
 | `bun run build` | Build de production |
 
@@ -84,29 +108,32 @@ l'environnement : aucune commande de démarrage manuelle n'y est nécessaire.
 
 ## 4. Variables d'environnement
 
-Aucun fichier `.env` n'est versionné ; voici le modèle complet à recopier dans
-`.env.local` (aucun secret à ces emplacements — la clé d'IA reste côté serveur
-Convex) :
+Aucun fichier `.env` n'est versionné ; **ce modèle fait foi** (`.env.example`
+fourni par la plateforme peut être en retard sur cette liste) :
 
 ```bash
-# URL du déploiement Convex (fournie par la plateforme)
-VITE_CONVEX_URL=
-# Cible Convex locale pour `bunx convex dev`
-CONVEX_DEPLOYMENT=
-# Adresse du backend MILES — vide = mode démonstration (données simulées)
-VITE_MILES_API_BASE_URL=
-# Clé du fournisseur IA (serveur Convex uniquement, jamais dans le navigateur)
-VLY_INTEGRATION_KEY=
+# ---- navigateur (Vite) ----
+VITE_CONVEX_URL=            # URL du déploiement Convex
+VITE_MILES_API_BASE_URL=    # backend MILES ; vide = mode démonstration
+# ---- machine ----
+CONVEX_DEPLOYMENT=          # cible de `bunx convex dev`
+CONVEX_SITE_URL=http://localhost:5173   # domain du front, requis par Convex Auth
+# ---- SERVEUR Convex (bunx convex env set, jamais dans .env.local) ----
+VLY_INTEGRATION_KEY=        # clé fournisseur IA / passerelle OTP
+VLY_INTEGRATION_BASE_URL=   # passerelle OTP optionnelle (défaut intégré)
 ```
 
 | Variable | Côté | Rôle |
 | --- | --- | --- |
 | `VITE_CONVEX_URL` | navigateur | URL du déploiement Convex (fournie) |
 | `CONVEX_DEPLOYMENT` | machine | Cible Convex locale |
+| `CONVEX_SITE_URL` | **serveur Convex** | Domaine du front, obligatoire pour l'OIDC discovery de Convex Auth |
 | `VITE_MILES_API_BASE_URL` | navigateur | Adresse du backend MILES ; **vide → mode démonstration** |
-| `VLY_INTEGRATION_KEY` | **serveur Convex** | Clé du fournisseur IA, injectée par la plateforme |
+| `VLY_INTEGRATION_KEY` | **serveur Convex** | Clé du fournisseur IA / passerelle OTP (`convex env set`) |
+| `VLY_INTEGRATION_BASE_URL` | **serveur Convex** | Passerelle OTP optionnelle, défaut `https://integrations.vly.ai` |
 
-Aucune clé secrète n'est présente dans le dépôt ni dans le bundle frontend.
+Aucune clé secrète n'est présente dans le dépôt ni dans le bundle frontend ;
+`.gitignore` exclut `.env` et `.env.*` (hors `.env.example`).
 
 ---
 
@@ -243,6 +270,21 @@ fournie est **jetée** si l'utilisateur a interrompu, erreurs du fournisseur
 nettoyées des jetons (`sanitizeError`), action de test de connectivité
 réservée aux sessions authentifiées.
 
+**Limitation de fréquence (`src/convex/rateLimit.ts`)** — toute dépense de
+jetons fournisseur est plafonnée **côté serveur**, dans la transaction même de
+la mutation (deux requêtes concurrentes ne peuvent pas passer ensemble), y
+compris pour les sessions invitées (anonymes) :
+
+| Cible | Seuil | Mécanisme |
+| --- | --- | --- |
+| Envoi **et** relance | 10 / 5 min par utilisateur | même seau `ai:gen:<userId>` dans `postMessage` et `retryMessage` |
+| Test fournisseur `ai.probe` | 3 / 5 min par identité | `internal.rateLimit.consume` appelé **avant** le provider, clé `ai:probe:<subject>` |
+
+Fenêtre fixe : pire cas = 2× le seuil à la frontière (≤ 20 générations /
+5 min), restreint volontairement simple et testé. Refus explicite avec délai
+avant nouvel essai (« Réessayer dans N s »). Seuils ajustables au haut de
+`rateLimit.ts` — tests `src/test/rateLimit.test.ts`.
+
 État vérifié : la passerelle répond (`gpt-4o-mini`, réponse test en ~1,5 s).
 
 ---
@@ -250,10 +292,14 @@ réservée aux sessions authentifiées.
 ## 9. Tests
 
 ```bash
-bun test
+bun run test        # script package.json = vitest run
 ```
 
-7 fichiers, 62 tests :
+> Piège documenté : `bun test` (sans `run`) lance le **runner natif de Bun**
+> sur les mêmes fichiers et échoue (8/62) — l'environnement jsdom est configuré
+> pour Vitest. Utilisez toujours `bun run test`.
+
+8 fichiers, 70 tests :
 
 | Fichier | Couverture |
 | --- | --- |
@@ -264,6 +310,14 @@ bun test
 | `src/components/miles/StatusBadge.test.tsx` | rendu Markdown, badges lisibles sans se fier à la couleur |
 | `src/components/layout/AppSidebar.test.tsx` | navigation complète (10 destinations), aucune entrée vers un module absent |
 | `src/state/settings.test.tsx` | repli sur les défauts si stockage corrompu, persistance des seuils |
+| `src/test/rateLimit.test.ts` | fenêtre fixe du rate limiter : acceptation, comptage, refus avec délai, réinitialisation, seuils documentés |
+
+CI (`.github/workflows/ci.yml`) : install reproductible (`bun install
+--frozen-lockfile`) → tests → typecheck → build. Le lint y tourne en
+`continue-on-error` : **3 erreurs et 25 warnings préexistent au template**
+(`ui/carousel.tsx:96`, `ui/sidebar.tsx:611`, `hooks/use-mobile.ts:14`) —
+aucune erreur n'est imputable au code applicatif, mais `bun run lint` sort
+en code 1 tant qu'elles ne sont pas corrigées.
 
 ---
 
@@ -300,6 +354,19 @@ bun test
    interrogation périodique, pas par WebSocket (architecturé pour l'ajouter :
    `state/miles.tsx`).
 6. **Quotas et coûts IA non affichés** : le fournisseur ne les expose pas.
+7. **Serveur de dev exposé** : `vite.config.ts` impose `host: true` (liaison
+   0.0.0.0, commentée nécessaire à l'événement « server-ready » de
+   l'environnement d'exécution) et `allowedHosts: true` (désactive la
+   vérification de l'en-tête `Host`). Risque : rejeu DNS-rebinding, **en
+   développement uniquement** (le build de production ne sert rien). Réglage
+   sûr proposé pour un auto-hébergement :
+   `server: { host: "127.0.0.1", allowedHosts: ["localhost", "<domaine>"] }`.
+   Non appliqué ici : le domaine de preview change par environnement et
+   `vite.config.ts` est verrouillé par la plateforme (§12) — **décision à
+   prendre à l'export**.
+8. **Rate limit en fenêtre fixe** : 2× le seuil possibles à la frontière d'une
+   fenêtre ; suffisant pour un usage humain, à remplacer par une fenêtre
+   glissante si le coût par requête augmente.
 
 ---
 
