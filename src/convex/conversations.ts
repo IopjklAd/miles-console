@@ -23,6 +23,7 @@ import {
 import {
   AI_GENERATION_LIMIT,
   enforceOrThrow,
+  generationBucketKey,
 } from "./rateLimit";
 
 function buildTitle(content: string): string {
@@ -168,7 +169,7 @@ export const postMessage = mutation({
     // retries, so a loop of relances cannot bypass the limit.
     await enforceOrThrow(
       ctx,
-      `ai:gen:${userId}`,
+      generationBucketKey(userId as string),
       AI_GENERATION_LIMIT.limit,
       AI_GENERATION_LIMIT.windowMs,
     );
@@ -250,7 +251,7 @@ export const retryMessage = mutation({
     // Retries spend provider tokens like a fresh send: same bucket.
     await enforceOrThrow(
       ctx,
-      `ai:gen:${userId}`,
+      generationBucketKey(userId as string),
       AI_GENERATION_LIMIT.limit,
       AI_GENERATION_LIMIT.windowMs,
     );

@@ -98,9 +98,10 @@ matériel n'existe → mode démonstration.
 | --- | --- |
 | `bun run dev` | Serveur de développement Vite |
 | `bunx convex dev` | Backend Convex + codegen (`_generated`) |
-| `bunx convex dev --once` | Codegen unique (CI / vérification) |
+| `bunx convex dev --once` | Codegen unique (nécessite un déploiement) |
+| `bunx convex codegen --system-udfs` | Codegen **hors-ligne** : aucun déploiement, aucun secret (utilisé en CI) |
 | `bun run typecheck` | `tsc -b --noEmit` |
-| `bun run test` | `vitest run` (70 tests ; **pas** `bun test`, voir §9) |
+| `bun run test` | `vitest run` (78 tests ; **pas** `bun test`, voir §9) |
 | `bun run lint` | ESLint |
 | `bun run build` | Build de production |
 
@@ -108,8 +109,10 @@ matériel n'existe → mode démonstration.
 
 ## 4. Variables d'environnement
 
-Aucun fichier `.env` n'est versionné ; **ce modèle fait foi** (`.env.example`
-fourni par la plateforme peut être en retard sur cette liste) :
+Aucun fichier `.env` n'est versionné ; **ce modèle fait foi** — le fichier
+`.env.example` du dépôt est verrouillé par la plateforme Freebuff et n'a pas
+pu y être actualisé : recopiez-y le bloc ci-dessous après export (il est plus
+complet que le fichier actuel) :
 
 ```bash
 # ---- navigateur (Vite) ----
@@ -280,10 +283,34 @@ compris pour les sessions invitées (anonymes) :
 | Envoi **et** relance | 10 / 5 min par utilisateur | même seau `ai:gen:<userId>` dans `postMessage` et `retryMessage` |
 | Test fournisseur `ai.probe` | 3 / 5 min par identité | `internal.rateLimit.consume` appelé **avant** le provider, clé `ai:probe:<subject>` |
 
+Les clés de seau ne sont construites qu'à un endroit — `generationBucketKey` /
+`probeBucketKey` dans `rateLimit.ts` — appelé par les deux mutations : envoyer
+et relancer partagent le quota **par construction**, pas par convention.
+
 Fenêtre fixe : pire cas = 2× le seuil à la frontière (≤ 20 générations /
 5 min), restreint volontairement simple et testé. Refus explicite avec délai
-avant nouvel essai (« Réessayer dans N s »). Seuils ajustables au haut de
-`rateLimit.ts` — tests `src/test/rateLimit.test.ts`.
+avant nouvel essai (« Réessayer dans N s ») et compteur non consommé en cas de
+refus. Seuils ajustables au haut de `rateLimit.ts`.
+
+Tests : `src/test/rateLimit.test.ts` (décision pure de fenêtre) et
+`src/test/rateLimitWiring.test.ts` (câblage serveur : seau partagé,
+persistance transactionnelle, refus, isolation par identité, namespaces).
+`convex-test` (qui exécute de vraies fonctions Convex) exige un backend en
+exécution, absent de la CI : ces tests rejouent donc le même chemin
+`ctx.db` avec un magasin en mémoire, sans aucun appel fournisseur.
+
+**Limite assumée (non résoluble par le code seul)** : le quota est **par
+identité**. Un abus qui multiplierait les sessions invitées conserve budget
+pour chaque nouvelle session — la protection ci-dessous limite les dégâts sans
+bloquer l'attaque. Protections complémentaires **proposées, non implémentées**
+(elles demandent un choix de produit ou de budget) :
+
+1. **Plafond côté fournisseur** (le plus efficace, aucun code) : budget max /
+dépense plafonnée chez le fournisseur IA, y compris en mode dégradé.
+2. **Plafond global serveur** : compteur `ai:gen:global` partagé — simple à
+ajouter, mais un seul utilisateur abusif coupe alors tout le monde.
+3. **Encadrement des sessions invitées** : désactiver la session invitée pour
+l'IA (ou la désactiver entièrement) — choix produit, réversible côté Convex Auth.
 
 État vérifié : la passerelle répond (`gpt-4o-mini`, réponse test en ~1,5 s).
 
@@ -296,10 +323,10 @@ bun run test        # script package.json = vitest run
 ```
 
 > Piège documenté : `bun test` (sans `run`) lance le **runner natif de Bun**
-> sur les mêmes fichiers et échoue (8/62) — l'environnement jsdom est configuré
-> pour Vitest. Utilisez toujours `bun run test`.
+> sur les mêmes fichiers et échoue (8/78) — l'environnement jsdom est
+> configuré pour Vitest. Utilisez toujours `bun run test`.
 
-8 fichiers, 70 tests :
+9 fichiers, 78 tests :
 
 | Fichier | Couverture |
 | --- | --- |
@@ -311,13 +338,24 @@ bun run test        # script package.json = vitest run
 | `src/components/layout/AppSidebar.test.tsx` | navigation complète (10 destinations), aucune entrée vers un module absent |
 | `src/state/settings.test.tsx` | repli sur les défauts si stockage corrompu, persistance des seuils |
 | `src/test/rateLimit.test.ts` | fenêtre fixe du rate limiter : acceptation, comptage, refus avec délai, réinitialisation, seuils documentés |
+| `src/test/rateLimitWiring.test.ts` | câblage serveur : seau partagé envoi/relance, refus sans consommer de slot, compteur persisté entre transactions, isolation par identité, séparation génération/probe |
 
 CI (`.github/workflows/ci.yml`) : install reproductible (`bun install
---frozen-lockfile`) → tests → typecheck → build. Le lint y tourne en
-`continue-on-error` : **3 erreurs et 25 warnings préexistent au template**
-(`ui/carousel.tsx:96`, `ui/sidebar.tsx:611`, `hooks/use-mobile.ts:14`) —
-aucune erreur n'est imputable au code applicatif, mais `bun run lint` sort
-en code 1 tant qu'elles ne sont pas corrigées.
+--frozen-lockfile`, Bun figé à 1.3.14) → **codegen Convex hors-ligne**
+(`bunx convex codegen --system-udfs`) → tests → typecheck → lint → build.
+
+Le codegen mérite une note : `bunx convex codegen` « tout court » échoue en
+GitHub Actions avec `No CONVEX_DEPLOYMENT set`, parce que la CLI exige des
+identifiants de déploiement et que `.env.local` (qui les contient en local)
+ne versionne rien. Le drapeau `--system-udfs` emprunte la voie hors-ligne du
+CLI (écriture locale de `api`/`dataModel`/`server`, sans réseau ni secret).
+Vérifié sur un clone vierge : typecheck, tests et build passent avec cette
+génération. Elle n'exporte pas `components`, inutilisé ici.
+
+Le lint n'est plus simplement toléré : le pas échoue dès qu'une **nouvelle**
+erreur apparaît, et ne tolère que les 3 erreurs connues du template
+(`ui/carousel.tsx:96`, `ui/sidebar.tsx:611`, `hooks/use-mobile.ts:14` ;
+25 warnings associés, aucun fichier applicatif concerné).
 
 ---
 
@@ -333,6 +371,12 @@ en code 1 tant qu'elles ne sont pas corrigées.
   l'UI nécessaire pour un capteur standard).
 - Export : télécharger le dépôt tel quel ; aucun secret n'y est stocké
   (`.env.example` sans valeurs).
+- **Gestion des paquets : Bun uniquement.** `bun.lock` est le seul lockfile
+  faisant foi (install, CI). `package-lock.json` a été retiré : il était périmé
+  (il ne référençait ni `vitest`, ni `jsdom`, ni `@testing-library/*`, donc
+  `npm ci` échouait déjà) et aucun script ni workflow ne l'utilisait. Un
+  `npm install` le régénérerait si un environnement en avait besoin — dans ce
+  cas, documentez-le comme secondaire ou retirez-le à nouveau.
 
 ---
 
@@ -354,19 +398,33 @@ en code 1 tant qu'elles ne sont pas corrigées.
    interrogation périodique, pas par WebSocket (architecturé pour l'ajouter :
    `state/miles.tsx`).
 6. **Quotas et coûts IA non affichés** : le fournisseur ne les expose pas.
-7. **Serveur de dev exposé** : `vite.config.ts` impose `host: true` (liaison
-   0.0.0.0, commentée nécessaire à l'événement « server-ready » de
-   l'environnement d'exécution) et `allowedHosts: true` (désactive la
-   vérification de l'en-tête `Host`). Risque : rejeu DNS-rebinding, **en
-   développement uniquement** (le build de production ne sert rien). Réglage
-   sûr proposé pour un auto-hébergement :
-   `server: { host: "127.0.0.1", allowedHosts: ["localhost", "<domaine>"] }`.
-   Non appliqué ici : le domaine de preview change par environnement et
-   `vite.config.ts` est verrouillé par la plateforme (§12) — **décision à
-   prendre à l'export**.
+7. **Serveur de dev exposé — analyse, aucun changement appliqué.**
+   - *Impact dans Freebuff* : `host: true` lie le serveur sur toutes les
+     interfaces (0.0.0.0:5173), condition de l'événement « server-ready » que
+     la plateforme écoute pour ouvrir le preview ; `allowedHosts: true`
+     désactive la vérification de l'en-tête `Host`, nécessaire ici car le
+     domaine de preview est généré par environnement et le plugin de la
+     plateforme (`vlyPlugin`) est injecté à la volée. Restreindre l'un ou
+     l'autre exposerait un risque direct de preview en 403 / HMR cassé.
+   - *Vérifications disponibles* : aucune ne permet de prouver qu'une valeur
+     restrictive reste compatible sans casser le preview en cours — je ne
+     change donc pas ce fichier (règle §12) plutôt que d'appliquer une valeur
+     générique non testée.
+   - *Risque réel* : rejeu DNS-rebinding contre le serveur de **développement**
+     uniquement ; `bun run build` ne sert aucun serveur, le risque ne se
+     retrouve pas en production.
+   - *Recommandé pour un auto-hébergement* (à appliquer à l'export, après
+     validation chez vous) :
+     `server: { host: "127.0.0.1", port: 5173, allowedHosts: ["localhost", "<votre-domaine>"] }`
+     — ou `host: true` seul si l'accès réseau interne est voulu. **Décision à
+     prendre à l'export.**
 8. **Rate limit en fenêtre fixe** : 2× le seuil possibles à la frontière d'une
    fenêtre ; suffisant pour un usage humain, à remplacer par une fenêtre
    glissante si le coût par requête augmente.
+9. **Quota IA par identité uniquement** : les sessions invitées sont limitées
+   comme les comptes, mais multiplier les identités multiplie les budgets. Les
+   trois compléments possibles (plafond fournisseur, plafond global, encadrement
+   des sessions invitées) sont décrits §8 — choisis, non implémentés.
 
 ---
 

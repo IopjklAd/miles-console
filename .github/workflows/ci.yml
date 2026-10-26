@@ -12,18 +12,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Version figée = même chaîne d'outils que le lockfile (bun.lock).
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       # Installation reproductible : le lockfile (bun.lock) fait foi.
+      # package-lock.json n'est PAS utilisé (voir README §Gestion des paquets).
       - name: Installer les dépendances
         run: bun install --frozen-lockfile
 
-      # src/convex/_generated est ignoré par git : les types Convex doivent
-      # être régénérés à chaque clone (fonctionne hors ligne, sans déploiement).
-      - name: Générer les types Convex
-        run: bunx convex codegen
+      # src/convex/_generated est ignoré par git : il doit être régénéré à
+      # chaque clone.
+      #
+      # `bunx convex codegen` tout court échoue ici avec « No CONVEX_DEPLOYMENT
+      # set » : le CLI exige des identifiants de déploiement (aucun n'existe en
+      # CI, et aucun secret ne doit être copié dans le dépôt). Le drapeau
+      # `--system-udfs` emprunte la voie hors-ligne du CLI : elle écrit
+      # api/dataModel/server localement, sans déploiement ni réseau.
+      # Vérifié : cette génération fait passer typecheck + tests + build sur un
+      # clone vierge. Elle n'exporte pas `components` (inutilisé dans ce projet).
+      - name: Générer les types Convex (hors-ligne, sans déploiement)
+        run: bunx convex codegen --system-udfs
 
       - name: Tests (Vitest)
         run: bun run test
@@ -31,13 +41,39 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      # Tolérant : `bun run lint` sort en code 1 à cause de 3 erreurs et
-      # 25 warnings PRÉEXISTANTS du template (ui/carousel.tsx:96,
-      # ui/sidebar.tsx:611, hooks/use-mobile.ts:14), aucun n'étant imputable
-      # au code applicatif. À resserrer dès que le template est nettoyé.
-      - name: Lint (tolérant — erreurs préexistantes du template)
-        run: bun run lint
-        continue-on-error: true
+      # Le lint échoue (code 1) à cause de 3 erreurs PRÉEXISTANTES du template,
+      # toutes hors code applicatif :
+      #   src/components/ui/carousel.tsx:96   (setState dans un effet)
+      #   src/components/ui/sidebar.tsx:611   (fonction impure pendant le rendu)
+      #   src/hooks/use-mobile.ts:14          (setState dans un effet)
+      # Ce pas reste donc strict : il échoue si une NOUVELLE erreur apparaît,
+      # et tolère uniquement ces trois lignes connues.
+      - name: Lint (nouvelles erreurs bloquantes, erreurs du template tolérées)
+        run: |
+          report=$(mktemp)
+          set +e
+          bun run lint > "$report" 2>&1
+          status=$?
+          set -e
+          cat "$report"
+          if [ "$status" -eq 0 ]; then
+            echo "Lint : aucune erreur."
+            exit 0
+          fi
+          # Baseline connue : exactement 3 erreurs, toutes dans le template.
+          # Stylish imprime une ligne «   ligne:col  error  message » par erreur
+          # (le résumé « 3 errors, » ne contient pas « error  » : non compté).
+          baseline=3
+          total=$(grep -c "  error  " "$report" || true)
+          echo "erreurs de lint=$total | baseline template=$baseline"
+          # Attribution indicative (n'influe pas sur le verdict) :
+          awk '/^\// { file = $0 } /  error  / { print "  -> " file }' "$report"
+          if [ "$total" -gt "$baseline" ]; then
+            echo "::error::Nouvelles erreurs de lint détectées ($total > $baseline) — détail ci-dessus."
+            exit 1
+          fi
+          echo "Lint : $total erreur(s) = baseline connue du template — toléré."
+          exit 0
 
       - name: Build de production
         run: bun run build

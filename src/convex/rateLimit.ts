@@ -24,6 +24,20 @@ import { internalMutation, type MutationCtx } from "./_generated/server";
 export const AI_GENERATION_LIMIT = { limit: 10, windowMs: 5 * 60_000 } as const;
 export const AI_PROBE_LIMIT = { limit: 3, windowMs: 5 * 60_000 } as const;
 
+/**
+ * Bucket keys are built here and nowhere else, so `postMessage` and
+ * `retryMessage` are structurally guaranteed to share one quota: both call
+ * `generationBucketKey`. Probe lives in its own namespace so testing the
+ * provider cannot drain the conversation budget.
+ */
+export function generationBucketKey(subject: string): string {
+  return `ai:gen:${subject}`;
+}
+
+export function probeBucketKey(subject: string): string {
+  return `ai:probe:${subject}`;
+}
+
 export interface RateLimitState {
   windowStart: number;
   count: number;

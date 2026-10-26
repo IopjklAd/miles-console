@@ -28,7 +28,7 @@ import {
   isAllowedModel,
   sanitizeError,
 } from "./aiConfig";
-import { AI_PROBE_LIMIT } from "./rateLimit";
+import { AI_PROBE_LIMIT, probeBucketKey } from "./rateLimit";
 
 interface ProviderResult {
   ok: boolean;
@@ -199,7 +199,7 @@ export const probe = action({
     // (anonymous sessions included) BEFORE contacting the provider.
     const rate: { ok: boolean; retryAfterMs: number; message: string } =
       await ctx.runMutation(internal.rateLimit.consume, {
-      key: `ai:probe:${identity.subject}`,
+      key: probeBucketKey(identity.subject),
       limit: AI_PROBE_LIMIT.limit,
       windowMs: AI_PROBE_LIMIT.windowMs,
     });
