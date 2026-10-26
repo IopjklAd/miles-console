@@ -7,9 +7,9 @@
  */
 
 /** Models documented by the integration gateway (see integrations.md). */
-export const AI_MODELS = ["gpt-4o-mini", "gpt-4o"];
+export const AI_MODELS = ["grok-4.7", "grok-4.1", "grok-4"];
 
-export const DEFAULT_AI_MODEL = "gpt-4o-mini";
+export const DEFAULT_AI_MODEL = "grok-4.7";
 
 /** Reject anything that is not part of the documented model list. */
 export function isAllowedModel(model: string | undefined): boolean {

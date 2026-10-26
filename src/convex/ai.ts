@@ -6,15 +6,17 @@
  * This is the ONLY file that talks to an AI provider: changing supplier means
  * editing this module, the rest of the console is untouched.
  *
- * - keys are read from the deployment environment, never sent to the browser;
+ * - keys are read from the deployment environment (XAI_API_KEY), never sent
+ *   to the browser;
  * - `generate` is an internal action scheduled by a mutation (already
- *   authenticated and rate-checked there ‚Äî see rateLimit.ts);
+ *   authenticated and rate-checked there ó see rateLimit.ts);
  * - `probe` is throttled server-side per identity before any provider call;
  * - provider failures are mapped to explicit messages with credentials
  *   stripped, and a reply produced after the user pressed "stop" is dropped.
+ *
+ * Provider: xAI Grok (https://api.x.ai/v1/responses)
  */
 
-import { vly } from "../lib/vly-integrations";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalAction, type ActionCtx } from "./_generated/server";
@@ -30,6 +32,9 @@ import {
 } from "./aiConfig";
 import { AI_PROBE_LIMIT, probeBucketKey } from "./rateLimit";
 
+const XAI_API_URL = "https://api.x.ai/v1/responses";
+const XAI_TIMEOUT_MS = 60_000;
+
 interface ProviderResult {
   ok: boolean;
   text?: string;
@@ -38,37 +43,112 @@ interface ProviderResult {
   completionTokens?: number;
 }
 
+function hasXaiKey(): boolean {
+  return Boolean(process.env.XAI_API_KEY);
+}
+
+function getXaiModel(): string {
+  return process.env.XAI_MODEL || DEFAULT_AI_MODEL;
+}
+
 async function complete(
   model: string,
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
 ): Promise<ProviderResult> {
-  const response = await vly.ai.completion({
-    model,
-    messages,
-    temperature: TEMPERATURE,
-    maxTokens: MAX_TOKENS,
-  });
-
-  const text = response.data?.choices?.[0]?.message?.content?.trim();
-  if (!response.success || !text) {
+  const apiKey = process.env.XAI_API_KEY;
+  if (!apiKey) {
     return {
       ok: false,
-      error: sanitizeError(
-        response.error ?? "Le fournisseur n'a renvoy√© aucun contenu.",
-      ),
+      error: "Aucune clÈ API xAI configurÈe cÙtÈ serveur (XAI_API_KEY).",
     };
   }
 
-  return {
-    ok: true,
-    text,
-    promptTokens: response.data?.usage?.promptTokens,
-    completionTokens: response.data?.usage?.completionTokens,
-  };
-}
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), XAI_TIMEOUT_MS);
 
-function hasIntegrationKey(): boolean {
-  return Boolean(process.env.VLY_INTEGRATION_KEY);
+  try {
+    const response = await fetch(XAI_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        input: messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+        temperature: TEMPERATURE,
+        max_output_tokens: MAX_TOKENS,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      return {
+        ok: false,
+        error: sanitizeError(
+          `Erreur HTTP ${response.status}: ${body.slice(0, 200)}`,
+        ),
+      };
+    }
+
+    const data = (await response.json()) as {
+      output?: Array<{
+        type?: string;
+        role?: string;
+        content?: Array<{ type?: string; text?: string }>;
+      }>;
+      usage?: { input_tokens?: number; output_tokens?: number };
+    };
+
+    // Extract text from the Responses API format:
+    // output[].content[].text where type === "output_text"
+    let text = "";
+    if (Array.isArray(data.output)) {
+      for (const item of data.output) {
+        if (item.type === "message" && Array.isArray(item.content)) {
+          for (const part of item.content) {
+            if (part.type === "output_text" && part.text) {
+              text += part.text;
+            }
+          }
+        }
+      }
+    }
+    text = text.trim();
+
+    if (!text) {
+      return {
+        ok: false,
+        error: "Le fournisseur n'a renvoyÈ aucun contenu.",
+      };
+    }
+
+    return {
+      ok: true,
+      text,
+      promptTokens: data.usage?.input_tokens,
+      completionTokens: data.usage?.output_tokens,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return {
+        ok: false,
+        error: "DÈlai d'attente dÈpassÈ lors de l'appel au fournisseur.",
+      };
+    }
+    return {
+      ok: false,
+      error: sanitizeError(
+        error instanceof Error ? error.message : "Erreur inconnue.",
+      ),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /**
@@ -88,13 +168,13 @@ export const generate = internalAction({
     );
     if (!pending || pending.status !== "pending") return;
 
-    const model = isAllowedModel(args.model) ? args.model : DEFAULT_AI_MODEL;
+    const model = isAllowedModel(args.model) ? args.model : getXaiModel();
 
-    if (!hasIntegrationKey()) {
+    if (!hasXaiKey()) {
       await ctx.runMutation(internal.conversations.failMessage, {
         messageId: args.messageId,
         error:
-          "Aucun fournisseur IA configur√© c√¥t√© serveur (cl√© d'int√©gration absente de l'environnement Convex).",
+          "Aucun fournisseur IA configurÈ cÙtÈ serveur (XAI_API_KEY absente de l'environnement Convex).",
       });
       return;
     }
@@ -166,14 +246,14 @@ export const generate = internalAction({
 export const status = action({
   args: {},
   handler: async () => {
-    const configured = hasIntegrationKey();
+    const configured = hasXaiKey();
     return {
       configured,
       provider: configured
-        ? "Passerelle d'int√©gration de la plateforme"
-        : "Aucun fournisseur configur√©",
+        ? "xAI Grok (direct)"
+        : "Aucun fournisseur configurÈ",
       models: AI_MODELS,
-      defaultModel: DEFAULT_AI_MODEL,
+      defaultModel: hasXaiKey() ? (process.env.XAI_MODEL || DEFAULT_AI_MODEL) : DEFAULT_AI_MODEL,
     };
   },
 });
@@ -207,30 +287,31 @@ export const probe = action({
       return { ok: false as const, error: rate.message };
     }
 
-    if (!hasIntegrationKey()) {
+    if (!hasXaiKey()) {
       return {
         ok: false as const,
         error:
-          "Aucune cl√© d'int√©gration configur√©e c√¥t√© serveur (VLY_INTEGRATION_KEY).",
+          "Aucune clÈ API xAI configurÈe cÙtÈ serveur (XAI_API_KEY).",
       };
     }
 
+    const model = getXaiModel();
     const startedAt = Date.now();
     try {
-      const result = await complete(DEFAULT_AI_MODEL, [
-        { role: "user", content: "R√©ponds uniquement par : OK" },
+      const result = await complete(model, [
+        { role: "user", content: "RÈsponds uniquement par : OK" },
       ]);
       const latencyMs = Date.now() - startedAt;
       if (!result.ok || !result.text) {
         return {
           ok: false as const,
-          error: result.error ?? "R√©ponse vide du fournisseur.",
+          error: result.error ?? "RÈponse vide du fournisseur.",
           latencyMs,
         };
       }
       return {
         ok: true as const,
-        model: DEFAULT_AI_MODEL,
+        model,
         latencyMs,
         sample: result.text.slice(0, 60),
       };
